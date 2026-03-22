@@ -1,0 +1,439 @@
+<?php
+session_start();
+require_once "auth_check.php";
+
+$currentPage = 'manage_reservations';
+
+/* ================= CSRF TOKEN ================= */
+if (empty($_SESSION['token'])) {
+    $_SESSION['token'] = bin2hex(random_bytes(32));
+}
+
+/* ================= DATABASE CONNECTION ================= */
+try {
+    $pdo = new PDO(
+        "mysql:host=localhost;dbname=sti_library;charset=utf8mb4",
+        "root",
+        "",
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]
+    );
+} catch (PDOException $e) {
+    die("Database connection failed.");
+}
+
+/* ================= HELPERS ================= */
+function e($value): string {
+    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+function formatDateText($date): string {
+    if (empty($date) || $date === '0000-00-00') {
+        return '—';
+    }
+    return date('M d, Y', strtotime($date));
+}
+
+/* ================= AUTO EXPIRE ================= */
+/* Pending or ready reservations past expiry date become expired */
+$pdo->exec("
+    UPDATE reservations
+    SET status = 'expired'
+    WHERE status IN ('pending', 'ready')
+      AND expiryDate IS NOT NULL
+      AND expiryDate < CURDATE()
+");
+
+/* ================= HANDLE CANCEL ================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_id'])) {
+    if (!hash_equals($_SESSION['token'], $_POST['token'] ?? '')) {
+        die("❌ Invalid CSRF token.");
+    }
+
+    $cancelId = (int) $_POST['cancel_id'];
+
+    $stmt = $pdo->prepare("
+        SELECT id, status
+        FROM reservations
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$cancelId]);
+    $reservation = $stmt->fetch();
+
+    if (!$reservation) {
+        die("❌ Reservation not found.");
+    }
+
+    if (in_array($reservation['status'], ['cancelled', 'borrowed', 'expired'], true)) {
+        header("Location: manage_reservations.php");
+        exit();
+    }
+
+    $update = $pdo->prepare("
+        UPDATE reservations
+        SET status = 'cancelled'
+        WHERE id = ?
+    ");
+    $update->execute([$cancelId]);
+
+    $_SESSION['reservation_success'] = 'Reservation cancelled successfully.';
+    header("Location: manage_reservations.php");
+    exit();
+}
+
+/* ================= SEARCH + TAB ================= */
+$search = trim($_GET['search'] ?? '');
+$tab = trim($_GET['tab'] ?? 'active');
+
+$allowedTabs = ['active', 'pending', 'ready', 'completed'];
+if (!in_array($tab, $allowedTabs, true)) {
+    $tab = 'active';
+}
+
+/* ================= COUNTS ================= */
+$activeCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM reservations
+    WHERE status IN ('pending', 'ready')
+")->fetchColumn();
+
+$pendingCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM reservations
+    WHERE status = 'pending'
+")->fetchColumn();
+
+$readyCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM reservations
+    WHERE status = 'ready'
+")->fetchColumn();
+
+$completedCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM reservations
+    WHERE status IN ('borrowed', 'cancelled', 'expired')
+")->fetchColumn();
+
+$totalCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM reservations
+")->fetchColumn();
+
+/* ================= STATUS FILTER ================= */
+$whereStatus = match ($tab) {
+    'active' => "r.status IN ('pending', 'ready')",
+    'pending' => "r.status = 'pending'",
+    'ready' => "r.status = 'ready'",
+    'completed' => "r.status IN ('borrowed', 'cancelled', 'expired')",
+    default => "r.status IN ('pending', 'ready')"
+};
+
+/* ================= FETCH RESERVATIONS ================= */
+$sql = "
+    SELECT
+        r.*,
+        bk.title AS book_title,
+        bk.author AS book_author,
+        bk.isbn AS book_isbn,
+        bk.coverImage AS book_cover,
+        u.fullname AS user_fullname,
+        u.student_id AS user_student_id,
+        u.course AS user_course,
+        u.yearlvl AS user_yearlvl
+    FROM reservations r
+    LEFT JOIN books bk ON bk.id = r.book_id
+    LEFT JOIN users u ON u.id = r.user_id
+    WHERE {$whereStatus}
+";
+
+$params = [];
+
+if ($search !== '') {
+    $sql .= "
+        AND (
+            r.studentName LIKE :search
+            OR r.student_id LIKE :search
+            OR u.fullname LIKE :search
+            OR u.student_id LIKE :search
+            OR bk.title LIKE :search
+            OR CAST(r.id AS CHAR) LIKE :search
+        )
+    ";
+    $params[':search'] = "%{$search}%";
+}
+
+if ($tab === 'completed') {
+    $sql .= " ORDER BY r.reservationDate DESC, r.id DESC";
+} else {
+    $sql .= " ORDER BY r.id DESC";
+}
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$reservations = $stmt->fetchAll();
+
+$successMessage = $_SESSION['reservation_success'] ?? '';
+unset($_SESSION['reservation_success']);
+
+/* ================= DISPLAY HELPERS ================= */
+function getStudentName(array $row): string {
+    if (!empty($row['studentName'])) return $row['studentName'];
+    if (!empty($row['user_fullname'])) return $row['user_fullname'];
+    return 'Unknown Student';
+}
+
+function getStudentId(array $row): string {
+    if (!empty($row['student_id'])) return $row['student_id'];
+    if (!empty($row['user_student_id'])) return $row['user_student_id'];
+    return '—';
+}
+
+function getStatusBadgeClass(string $status): string {
+    return match ($status) {
+        'pending' => 'bg-gray-100 text-gray-700',
+        'ready' => 'bg-green-100 text-green-700',
+        'borrowed' => 'bg-blue-100 text-blue-700',
+        'cancelled' => 'bg-red-100 text-red-700',
+        'expired' => 'bg-red-100 text-red-700',
+        default => 'bg-gray-100 text-gray-700',
+    };
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Reservations</title>
+    <link href="/library-management-system/assets/css/output.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+
+<?php include 'header.php'; ?>
+
+<div class="max-w-7xl mx-auto p-6 mt-36">
+
+    <!-- PAGE HEADER -->
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-900">Manage Reservations</h1>
+        <p class="text-gray-600 mt-2 text-lg">View and manage all book reservations</p>
+    </div>
+
+    <?php if ($successMessage !== ''): ?>
+        <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
+            <?= e($successMessage) ?>
+        </div>
+    <?php endif; ?>
+
+    <!-- STATS -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between mb-8">
+                <h3 class="text-lg font-semibold text-gray-900">Active Reservations</h3>
+                <span class="text-blue-600 text-xl">▣</span>
+            </div>
+            <div class="text-4xl font-bold text-gray-900"><?= e($activeCount) ?></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between mb-8">
+                <h3 class="text-lg font-semibold text-gray-900">Ready for Pickup</h3>
+                <span class="text-green-600 text-xl">▣</span>
+            </div>
+            <div class="text-4xl font-bold text-green-600"><?= e($readyCount) ?></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between mb-8">
+                <h3 class="text-lg font-semibold text-gray-900">Total Reservations</h3>
+                <span class="text-purple-600 text-xl">▣</span>
+            </div>
+            <div class="text-4xl font-bold text-gray-900"><?= e($totalCount) ?></div>
+        </div>
+    </div>
+
+    <!-- SEARCH -->
+    <form method="GET" class="mb-6">
+        <input type="hidden" name="tab" value="<?= e($tab) ?>">
+        <div class="relative">
+            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-lg">⌕</span>
+            <input
+                type="text"
+                name="search"
+                value="<?= e($search) ?>"
+                placeholder="Search by student name or ID..."
+                class="w-full bg-white border border-gray-200 rounded-xl pl-12 pr-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+        </div>
+    </form>
+
+    <!-- TABS -->
+    <div class="mb-8">
+        <div class="inline-flex bg-white rounded-2xl p-1 border border-gray-200 shadow-sm gap-1">
+            <a href="?tab=active&search=<?= urlencode($search) ?>"
+               class="px-4 py-2 rounded-xl font-medium transition <?= $tab === 'active' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100' ?>">
+                Active (<?= e($activeCount) ?>)
+            </a>
+
+            <a href="?tab=pending&search=<?= urlencode($search) ?>"
+               class="px-4 py-2 rounded-xl font-medium transition <?= $tab === 'pending' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100' ?>">
+                Pending (<?= e($pendingCount) ?>)
+            </a>
+
+            <a href="?tab=ready&search=<?= urlencode($search) ?>"
+               class="px-4 py-2 rounded-xl font-medium transition <?= $tab === 'ready' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100' ?>">
+                Ready (<?= e($readyCount) ?>)
+            </a>
+
+            <a href="?tab=completed&search=<?= urlencode($search) ?>"
+               class="px-4 py-2 rounded-xl font-medium transition <?= $tab === 'completed' ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100' ?>">
+                Completed (<?= e($completedCount) ?>)
+            </a>
+        </div>
+    </div>
+
+    <!-- LIST -->
+    <div class="space-y-4">
+        <?php if (empty($reservations)): ?>
+            <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+                <?php if ($tab === 'active'): ?>
+                    <h3 class="text-2xl font-semibold text-gray-900">No Active Reservations</h3>
+                    <p class="text-gray-600 mt-2">
+                        <?= $search === '' ? 'There are no active reservations at the moment.' : 'No reservations match your search.' ?>
+                    </p>
+                <?php elseif ($tab === 'pending'): ?>
+                    <h3 class="text-2xl font-semibold text-gray-900">No Pending Reservations</h3>
+                    <p class="text-gray-600 mt-2">
+                        <?= $search === '' ? 'There are no pending reservations.' : 'No pending reservations match your search.' ?>
+                    </p>
+                <?php elseif ($tab === 'ready'): ?>
+                    <h3 class="text-2xl font-semibold text-gray-900">No Books Ready</h3>
+                    <p class="text-gray-600 mt-2">
+                        <?= $search === '' ? 'No books are ready for pickup.' : 'No ready reservations match your search.' ?>
+                    </p>
+                <?php else: ?>
+                    <h3 class="text-2xl font-semibold text-gray-900">No Completed Reservations</h3>
+                    <p class="text-gray-600 mt-2">
+                        <?= $search === '' ? 'No completed reservations yet.' : 'No completed reservations match your search.' ?>
+                    </p>
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+
+            <?php foreach ($reservations as $row): ?>
+                <?php
+                    $studentName = getStudentName($row);
+                    $studentId = getStudentId($row);
+                    $cover = !empty($row['book_cover']) ? $row['book_cover'] : 'https://placehold.co/100x140?text=No+Cover';
+                    $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d')) > strtotime($row['expiryDate']);
+                ?>
+
+                <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <div class="shrink-0">
+                            <img
+                                src="<?= e($cover) ?>"
+                                alt="Book Cover"
+                                class="w-20 h-28 object-cover rounded border"
+                            >
+                        </div>
+
+                        <div class="flex-1">
+                            <div class="flex flex-col md:flex-row md:justify-between md:items-start gap-3">
+                                <div>
+                                    <h3 class="text-lg font-semibold text-gray-900">
+                                        <?= e($row['book_title'] ?: 'Unknown Book') ?>
+                                    </h3>
+                                    <p class="text-sm text-gray-600">
+                                        <?= e($row['book_author'] ?: 'Unknown Author') ?>
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= getStatusBadgeClass((string)$row['status']) ?>">
+                                        <?= e(ucfirst((string)$row['status'])) ?>
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3 text-sm mt-4">
+                                <div>
+                                    <span class="text-gray-500">Student:</span>
+                                    <p class="font-medium text-gray-900"><?= e($studentName) ?></p>
+                                </div>
+
+                                <div>
+                                    <span class="text-gray-500">Student ID:</span>
+                                    <p class="font-medium text-gray-900"><?= e($studentId) ?></p>
+                                </div>
+
+                                <div>
+                                    <span class="text-gray-500">Reserved:</span>
+                                    <p class="font-medium text-gray-900"><?= e(formatDateText($row['reservationDate'])) ?></p>
+                                </div>
+
+                                <div>
+                                    <span class="text-gray-500">Expires:</span>
+                                    <p class="font-medium <?= $isExpired ? 'text-red-600' : 'text-gray-900' ?>">
+                                        <?= e(formatDateText($row['expiryDate'])) ?>
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <span class="text-gray-500">Status:</span>
+                                    <div class="mt-1">
+                                        <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= getStatusBadgeClass((string)$row['status']) ?>">
+                                            <?= e(ucfirst((string)$row['status'])) ?>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <?php if (in_array($row['status'], ['pending', 'ready'], true)): ?>
+                                <div class="mt-4 flex gap-2">
+                                    <form method="POST" onsubmit="return confirm('Cancel reservation for <?= e(addslashes($studentName)) ?>?')">
+                                        <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
+                                        <input type="hidden" name="cancel_id" value="<?= e($row['id']) ?>">
+                                        <button type="submit"
+                                                class="border px-3 py-1.5 rounded-lg hover:bg-red-100 text-red-600">
+                                            Cancel
+                                        </button>
+                                    </form>
+                                </div>
+                            <?php endif; ?>
+
+                            <?php if ($row['status'] === 'ready'): ?>
+                                <div class="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800">
+                                    <p class="font-medium">Book is ready for pickup!</p>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+            <?php endforeach; ?>
+
+        <?php endif; ?>
+    </div>
+</div>
+
+<script>
+const searchInput = document.querySelector('input[name="search"]');
+
+if (searchInput) {
+    searchInput.addEventListener('input', function () {
+        const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
+
+        if (this.value.trim() === '') {
+            window.location.href = 'manage_reservations.php?tab=' + encodeURIComponent(currentTab);
+        }
+    });
+}
+</script>
+
+</body>
+</html>
