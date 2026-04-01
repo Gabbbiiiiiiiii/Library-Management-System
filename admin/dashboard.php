@@ -136,25 +136,68 @@ $availabilityPercent = $totalBooks > 0
 
 <?php
 $stats = [
-    ["Total Books", $totalBooks, "📘", "bg-blue-100 text-blue-600"],
-    ["Available Books", $availableBooks, "📈", "bg-green-100 text-green-600"],
-    ["Active Borrowings", count($activeBorrowings), "⏱", "bg-purple-100 text-purple-600"],
-    ["Overdue Books", count($overdueBorrowings), "⚠", "bg-red-100 text-red-600"],
-    ["Active Reservations", count($activeReservations), "📌", "bg-orange-100 text-orange-600"],
-    ["Total Penalties", "₱" . number_format($totalPenalties, 2), "👥", "bg-yellow-100 text-yellow-600"],
+    [
+        "Total Books",
+        $totalBooks,
+        '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+        </svg>',
+        "bg-blue-100 text-blue-600"
+    ],
+    [
+        "Available Books",
+        $availableBooks,
+        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17l6-6 4 4 8-8"/>
+        </svg>',
+        "bg-green-100 text-green-600"
+    ],
+    [
+        "Active Borrowings",
+        count($activeBorrowings),
+        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <circle cx="12" cy="12" r="10" stroke-width="2"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>
+        </svg>',
+        "bg-purple-100 text-purple-600"
+    ],
+    [
+        "Overdue Books",
+        count($overdueBorrowings),
+        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86l-7.4 12.8A1 1 0 003.74 18h16.52a1 1 0 00.85-1.54l-7.4-12.8a1 1 0 00-1.72 0z"/>
+        </svg>',
+        "bg-red-100 text-red-600"
+    ],
+    [
+        "Active Reservations",
+        count($activeReservations),
+        '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.75V16.5L12 14.25 7.5 16.5V3.75m9 0H18A2.25 2.25 0 0 1 20.25 6v12A2.25 2.25 0 0 1 18 20.25H6A2.25 2.25 0 0 1 3.75 18V6A2.25 2.25 0 0 1 6 3.75h1.5m9 0h-9" />
+        </svg>',
+        "bg-orange-100 text-orange-600"
+    ],
+    [
+        "Total Penalties",
+        "₱" . number_format($totalPenalties, 2),
+        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-2 0-3 1-3 2s1 2 3 2 3 1 3 2-1 2-3 2m0-10v10"/>
+        </svg>',
+        "bg-yellow-100 text-yellow-600"
+    ],
 ];
 
 foreach ($stats as $stat):
 ?>
-    <div class="bg-white rounded-2xl shadow-sm border p-6 hover:shadow-md transition">
+    <div class="bg-white rounded-2xl shadow-sm border p-6 hover:shadow-lg hover:-translate-y-1 transition duration-300">
         
         <div class="flex justify-between items-center mb-6">
             <p class="text-sm text-gray-600 font-medium">
                 <?= htmlspecialchars($stat[0]) ?>
             </p>
 
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center <?= $stat[3] ?>">
-                <span class="text-lg"><?= $stat[2] ?></span>
+            <div class="w-6 h-6 rounded-xl flex items-center justify-center <?= $stat[3] ?>">
+                <?= str_replace('w-6 h-6', 'w-6 h-6 stroke-current', $stat[2]) ?>
             </div>
         </div>
 

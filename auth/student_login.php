@@ -1,12 +1,15 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 include "../config/database.php";
 
 $error = "";
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-    $student_id = $_POST['student_id'];
+    $student_id = trim($_POST['student_id']);
     $password = $_POST['password'];
 
     $sql = "SELECT * FROM users WHERE student_id = ? AND role = 'student'";
@@ -20,10 +23,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         if (password_verify($password, $user['password'])) {
 
+            session_regenerate_id(true);
+
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['fullname'] = $user['fullname'];
             $_SESSION['student_id'] = $user['student_id'];
             $_SESSION['role'] = 'student';
+            $_SESSION['last_activity'] = time();
 
             header("Location: ../user/student_dashboard.php");
             exit();

@@ -1,6 +1,5 @@
 <?php
 session_start();
-
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'student') {
     header("Location: ../auth/student_login.php");
     exit();
@@ -165,7 +164,7 @@ if ($userId) {
     $params[':student_name'] = $studentName;
 }
 
-$sql .= " ORDER BY r.id DESC";
+$sql .= " ORDER BY r.reservationDate ASC, r.id ASC";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
@@ -181,7 +180,14 @@ $pastReservations = array_values(array_filter($allReservations, function ($row) 
 }));
 
 usort($pastReservations, function ($a, $b) {
-    return strtotime($b['reservationDate'] ?? '1970-01-01') <=> strtotime($a['reservationDate'] ?? '1970-01-01');
+    $dateCompare = strtotime($b['reservationDate'] ?? '1970-01-01') 
+                 <=> strtotime($a['reservationDate'] ?? '1970-01-01');
+
+    if ($dateCompare !== 0) {
+        return $dateCompare;
+    }
+
+    return ((int)($b['id'] ?? 0)) <=> ((int)($a['id'] ?? 0));
 });
 
 $successMessage = $_SESSION['reservation_success'] ?? '';
@@ -214,7 +220,7 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
     <!-- ACTIVE RESERVATIONS -->
     <section class="space-y-4 mb-8">
         <div class="flex items-center space-x-2">
-            <span class="text-gray-700 text-lg">🗂</span>
+            <span class="text-gray-700 text-lg"></span>
             <h2 class="text-xl font-semibold">Active Reservations</h2>
             <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-0.5 text-sm">
                 <?= e(count($activeReservations)) ?>
@@ -271,7 +277,7 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
                                         <?= e(statusLabel((string)$row['status'])) ?>
                                     </span>
 
-                                    <?php if ($row['status'] !== 'cancelled'): ?>
+                                    <?php if (in_array($row['status'], ['pending', 'ready'], true)): ?>
                                         <form method="POST" onsubmit="return confirm('Cancel this reservation?')">
                                             <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
                                             <input type="hidden" name="cancel_id" value="<?= e($row['id']) ?>">
@@ -287,8 +293,8 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
 
                                 <?php if ($row['status'] === 'ready'): ?>
                                     <div class="p-2 bg-green-50 rounded-lg text-sm text-green-800">
-                                        <p class="font-medium">Ready to pick up!</p>
-                                        <p class="text-xs">Please visit the library to borrow this book.</p>
+                                        <p class="font-medium">Book is ready for pickup!</p>
+                                        <p class="text-xs">Please visit the library before <?= e(formatDateText($row['expiryDate'])) ?>.</p>
                                     </div>
                                 <?php endif; ?>
                             </div>
@@ -303,7 +309,7 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
     <?php if (!empty($pastReservations)): ?>
         <section class="space-y-4 mb-8">
             <div class="flex items-center space-x-2">
-                <span class="text-gray-700 text-lg">📅</span>
+                <span class="text-gray-700 text-lg"></span>
                 <h2 class="text-xl font-semibold">Past Reservations</h2>
                 <span class="inline-flex items-center rounded-full border border-gray-300 px-3 py-0.5 text-sm">
                     <?= e(count($pastReservations)) ?>
@@ -353,12 +359,6 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
                                     </span>
                                 </div>
 
-                                <?php if ($row['status'] === 'ready'): ?>
-                                    <div class="p-2 bg-green-50 rounded-lg text-sm text-green-800">
-                                        <p class="font-medium">Ready to pick up!</p>
-                                        <p class="text-xs">Please visit the library to borrow this book.</p>
-                                    </div>
-                                <?php endif; ?>
                             </div>
                         </div>
                     </div>

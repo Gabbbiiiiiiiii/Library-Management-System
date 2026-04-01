@@ -1,4 +1,5 @@
 <?php
+session_start();
 if (!isset($currentPage)) {
     $currentPage = '';
 }
@@ -41,35 +42,35 @@ if (!isset($currentPage)) {
                 class="py-4 border-b-2 transition <?= $currentPage === 'dashboard'
                         ? 'border-purple-600 text-purple-600'
                         : 'border-transparent hover:text-purple-600 hover:border-purple-600' ?>">
-                    🏠 Dashboard
+                     Dashboard
                 </a>
 
                 <a href="manage_books.php"
                 class="py-4 border-b-2 transition <?= $currentPage === 'manage_books'
                         ? 'border-purple-600 text-purple-600'
                         : 'border-transparent hover:text-purple-600 hover:border-purple-600' ?>">
-                    📚 Manage Books
+                     Manage Books
                 </a>
 
                 <a href="manage_borrowings.php"
                 class="py-4 border-b-2 transition <?= $currentPage === 'manage_borrowings'
                         ? 'border-purple-600 text-purple-600'
                         : 'border-transparent hover:text-purple-600 hover:border-purple-600' ?>">
-                    ⏱ Borrowings
+                     Borrowings
                 </a>
 
                 <a href="manage_returns.php"
                 class="py-4 border-b-2 transition <?= $currentPage === 'manage_returns'
                         ? 'border-purple-600 text-purple-600'
                         : 'border-transparent hover:text-purple-600 hover:border-purple-600' ?>">
-                    🔄 Returns
+                     Returns
                 </a>
 
                 <a href="manage_reservations.php"
                 class="py-4 border-b-2 transition <?= $currentPage === 'manage_reservations'
                         ? 'border-purple-600 text-purple-600'
                         : 'border-transparent hover:text-purple-600 hover:border-purple-600' ?>">
-                    📌 Reservations
+                     Reservations
                 </a>
 
             </nav>

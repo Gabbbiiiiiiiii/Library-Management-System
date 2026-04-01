@@ -182,7 +182,9 @@ function formatDateText($date): string {
         <?php else: ?>
             <div class="mt-6 space-y-4">
                 <?php foreach ($currentBorrowings as $row): ?>
-                    <?php $cover = !empty($row['coverImage']) ? $row['coverImage'] : 'https://placehold.co/90x125?text=No+Cover'; ?>
+                    <?php $cover = !empty($row['coverImage']) 
+                    ? '/library-management-system/admin/' . ltrim($row['coverImage'], '/')
+                    : 'https://placehold.co/90x125?text=No+Cover'; ?>
                     <div class="border border-gray-200 rounded-2xl p-4 flex flex-col md:flex-row gap-4">
                         <img src="<?= e($cover) ?>"
                              alt="Book Cover"

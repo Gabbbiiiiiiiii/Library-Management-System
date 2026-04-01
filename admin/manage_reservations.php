@@ -84,6 +84,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_id'])) {
     exit();
 }
 
+/* ================= HANDLE PICKUP (BORROW RESERVED BOOK) ================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pickup_id'])) {
+    if (!hash_equals($_SESSION['token'], $_POST['token'] ?? '')) {
+        die("❌ Invalid CSRF token.");
+    }
+
+    $pickupId = (int)($_POST['pickup_id'] ?? 0);
+
+    if ($pickupId < 1) {
+        die("❌ Invalid reservation.");
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT r.*, bk.title AS book_title
+        FROM reservations r
+        LEFT JOIN books bk ON bk.id = r.book_id
+        WHERE r.id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$pickupId]);
+    $reservation = $stmt->fetch();
+
+    if (!$reservation) {
+        die("❌ Reservation not found.");
+    }
+
+    if ($reservation['status'] !== 'ready') {
+        die("❌ Only ready reservations can be marked as borrowed.");
+    }
+
+    $pdo->beginTransaction();
+
+    try {
+        $borrowDate = date('Y-m-d');
+        $dueDate = date('Y-m-d', strtotime($borrowDate . ' +1 day'));
+
+        $insertBorrowing = $pdo->prepare("
+            INSERT INTO borrowings (
+                book_id,
+                user_id,
+                studentName,
+                student_id,
+                course,
+                yearlvl,
+                borrowDate,
+                dueDate,
+                status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'borrowed')
+        ");
+
+        $insertBorrowing->execute([
+            $reservation['book_id'],
+            $reservation['user_id'] ?: null,
+            $reservation['studentName'] ?: null,
+            $reservation['student_id'] ?: null,
+            $reservation['course'] ?: null,
+            $reservation['yearlvl'] ?: null,
+            $borrowDate,
+            $dueDate
+        ]);
+
+        $updateReservation = $pdo->prepare("
+            UPDATE reservations
+            SET status = 'borrowed'
+            WHERE id = ?
+        ");
+        $updateReservation->execute([$reservation['id']]);
+
+        $pdo->commit();
+
+        $_SESSION['reservation_success'] = 'Reserved book has been released to the student successfully.';
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        die("❌ Failed to release reserved book: " . $e->getMessage());
+    }
+
+    header("Location: manage_reservations.php?tab=completed");
+    exit();
+}
+
 /* ================= SEARCH + TAB ================= */
 $search = trim($_GET['search'] ?? '');
 $tab = trim($_GET['tab'] ?? 'active');
@@ -169,7 +249,7 @@ if ($search !== '') {
 if ($tab === 'completed') {
     $sql .= " ORDER BY r.reservationDate DESC, r.id DESC";
 } else {
-    $sql .= " ORDER BY r.id DESC";
+    $sql .= " ORDER BY r.reservationDate ASC, r.id ASC";
 }
 
 $stmt = $pdo->prepare($sql);
@@ -393,9 +473,9 @@ function getStatusBadgeClass(string $status): string {
                                 </div>
                             </div>
 
-                            <?php if (in_array($row['status'], ['pending', 'ready'], true)): ?>
-                                <div class="mt-4 flex gap-2">
-                                    <form method="POST" onsubmit="return confirm('Cancel reservation for <?= e(addslashes($studentName)) ?>?')">
+                            <div class="mt-4 flex gap-2">
+                                <?php if (in_array($row['status'], ['pending', 'ready'], true)): ?>
+                                    <form method="POST" onsubmit="return confirm('Cancel reservation for <?= htmlspecialchars($studentName, ENT_QUOTES, 'UTF-8') ?>?')">
                                         <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
                                         <input type="hidden" name="cancel_id" value="<?= e($row['id']) ?>">
                                         <button type="submit"
@@ -403,12 +483,26 @@ function getStatusBadgeClass(string $status): string {
                                             Cancel
                                         </button>
                                     </form>
-                                </div>
-                            <?php endif; ?>
+                                <?php endif; ?>
+
+                                <?php if ($row['status'] === 'ready'): ?>
+                                    <form method="POST" onsubmit="return confirm('Release this reserved book to the student?')">
+                                        <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
+                                        <input type="hidden" name="pickup_id" value="<?= e($row['id']) ?>">
+                                        <button type="submit"
+                                                class="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">
+                                            Confirm Pickup
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
 
                             <?php if ($row['status'] === 'ready'): ?>
                                 <div class="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800">
                                     <p class="font-medium">Book is ready for pickup!</p>
+                                    <p class="mt-1 text-xs">
+                                        Pickup until <?= e(formatDateText($row['expiryDate'])) ?>.
+                                    </p>
                                 </div>
                             <?php endif; ?>
                         </div>

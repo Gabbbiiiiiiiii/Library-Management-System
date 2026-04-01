@@ -98,13 +98,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
     $course      = $borrowing['course'] ?: ($borrowing['user_course'] ?: null);
     $yearlvl     = $borrowing['yearlvl'] ?: ($borrowing['user_yearlvl'] ?: null);
 
-    $daysLate = getDaysLate($borrowing['dueDate'], date('Y-m-d'));
-    $penalty  = calculatePenalty($borrowing['dueDate'], date('Y-m-d'));
+    $today    = date('Y-m-d');
+    $daysLate = getDaysLate($borrowing['dueDate'], $today);
+    $penalty  = calculatePenalty($borrowing['dueDate'], $today);
     $remarks  = $daysLate > 0 ? "Returned {$daysLate} day(s) late" : "Returned on time";
 
     $pdo->beginTransaction();
 
     try {
+        /* 1. Save return record */
         $insertReturn = $pdo->prepare("
             INSERT INTO returns (
                 borrowing_id,
@@ -138,6 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
             $remarks
         ]);
 
+        /* 2. Mark borrowing as returned */
         $updateBorrowing = $pdo->prepare("
             UPDATE borrowings
             SET status = 'returned',
@@ -147,6 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
         ");
         $updateBorrowing->execute([$penalty, $borrowing['id']]);
 
+        /* 3. Increase available copies first */
         $updateBook = $pdo->prepare("
             UPDATE books
             SET availableCopies = availableCopies + 1
@@ -154,12 +158,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
         ");
         $updateBook->execute([$borrowing['book_id']]);
 
-        $pdo->commit();
+        /* 4. Find oldest pending reservation for this same book */
+        $findPendingReservation = $pdo->prepare("
+            SELECT id
+            FROM reservations
+            WHERE book_id = ?
+              AND status = 'pending'
+            ORDER BY reservationDate ASC, id ASC
+            LIMIT 1
+        ");
+        $findPendingReservation->execute([$borrowing['book_id']]);
+        $nextReservation = $findPendingReservation->fetch();
 
-        $_SESSION['success_message'] = 'Book returned successfully.';
+        /* 5. If there is a pending reservation, make it READY */
+        if ($nextReservation) {
+            $markReady = $pdo->prepare("
+                UPDATE reservations
+                SET status = 'ready',
+                    expiryDate = DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+                WHERE id = ?
+            ");
+            $markReady->execute([$nextReservation['id']]);
+
+            /* 6. Reserve that returned copy for pickup, so stock becomes 0 again */
+            $reserveCopy = $pdo->prepare("
+                UPDATE books
+                SET availableCopies = CASE
+                    WHEN availableCopies > 0 THEN availableCopies - 1
+                    ELSE 0
+                END
+                WHERE id = ?
+            ");
+            $reserveCopy->execute([$borrowing['book_id']]);
+
+            $_SESSION['success_message'] = 'Book returned successfully. The next reservation is now ready for pickup.';
+        } else {
+            $_SESSION['success_message'] = 'Book returned successfully.';
+        }
+
+        $pdo->commit();
     } catch (Exception $e) {
         $pdo->rollBack();
-        die("❌ Failed to process return.");
+        die("❌ Failed to process return: " . $e->getMessage());
     }
 
     header("Location: manage_returns.php");

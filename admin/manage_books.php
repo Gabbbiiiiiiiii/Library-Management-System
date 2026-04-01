@@ -572,15 +572,27 @@ class="px-3 py-1 border rounded
 <script>
 
 //search functionality: if user clears the search input, redirect to clean URL
-    const searchInput = document.querySelector('input[name="search"]');
+const searchInput = document.querySelector('input[name="search"]');
+let timeout;
 
 if (searchInput) {
     searchInput.addEventListener('input', function () {
-        // If input becomes empty
-        if (this.value.trim() === '') {
-            // Redirect to clean URL (no ?search=)
-            window.location.href = "manage_books.php";
-        }
+        clearTimeout(timeout);
+
+        timeout = setTimeout(() => {
+            const params = new URLSearchParams(window.location.search);
+            const currentCategory = params.get('category') || 'all';
+
+            if (this.value.trim() === '') {
+                // Reset search but keep category
+                window.location.href = 'manage_books.php?category=' + encodeURIComponent(currentCategory);
+            } else {
+                // Live search
+                window.location.href =
+                    'manage_books.php?search=' + encodeURIComponent(this.value) +
+                    '&category=' + encodeURIComponent(currentCategory);
+            }
+        }, 500); // adjust delay if needed
     });
 }
 

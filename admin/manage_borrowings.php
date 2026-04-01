@@ -463,10 +463,29 @@ function getYearLevelValue(array $row): string {
                                     <form method="POST" onsubmit="return confirm('Mark this book as returned?')">
                                         <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
                                         <input type="hidden" name="return_id" value="<?= e($row['id']) ?>">
-                                        <button type="submit"
-                                                class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition">
-                                            Return Book
-                                        </button>
+                                        <?php if ($row['status'] === 'borrowed'): ?>
+    
+                                            <!-- ACTIVE BADGE -->
+                                            <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                                                Active
+                                            </span>
+
+                                        <?php elseif ($row['status'] === 'returned'): ?>
+
+                                            <!-- RETURNED BADGE -->
+                                            <span class="px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700">
+                                                Returned
+                                            </span>
+
+                                        <?php elseif ($row['status'] === 'overdue'): ?>
+
+                                            <!-- OVERDUE BADGE -->
+                                            <span class="px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                                                Overdue
+                                            </span>
+
+                                        <?php endif; ?>
                                     </form>
                                 </div>
                             <?php endif; ?>

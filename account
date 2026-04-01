@@ -5,3 +5,6 @@ Student: 02000358778 / gabriel123
          02000358770 / jirah098
 
 secret-key: STI-ADMIN-2026
+
+user: http://localhost/library-management-system/index.php
+admin: http://localhost/library-management-system/admin/

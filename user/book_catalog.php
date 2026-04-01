@@ -1,6 +1,5 @@
 <?php
 session_start();
-
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'student') {
     header("Location: ../auth/student_login.php");
     exit();
@@ -450,6 +449,31 @@ function closeBookModal(id) {
         modal.classList.add('hidden');
         document.body.classList.remove('overflow-hidden');
     }
+}
+
+// Auto-reload page when search input is cleared
+const searchInput = document.querySelector('input[name="search"]');
+let timeout;
+
+if (searchInput) {
+    searchInput.addEventListener('input', function () {
+        clearTimeout(timeout);
+
+        timeout = setTimeout(() => {
+            const params = new URLSearchParams(window.location.search);
+            const currentCategory = params.get('category') || 'all';
+
+            if (this.value.trim() === '') {
+                // reset search but keep category
+                window.location.href = 'book_catalog.php?category=' + encodeURIComponent(currentCategory);
+            } else {
+                // live search
+                window.location.href =
+                    'book_catalog.php?search=' + encodeURIComponent(this.value) +
+                    '&category=' + encodeURIComponent(currentCategory);
+            }
+        }, 500); // 0.5s delay
+    });
 }
 </script>
 

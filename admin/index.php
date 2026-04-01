@@ -39,22 +39,23 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
 
-        if (
-            password_verify($password, $user['password']) &&
-            password_verify($secret_key, $user['secret_key'])
-        ) {
+       if (
+    password_verify($password, $user['password']) &&
+    password_verify($secret_key, $user['secret_key'])
+) {
 
-            // ✅ Reset attempts on success
-            $_SESSION['login_attempts'] = 0;
+    session_regenerate_id(true); // optional but recommended
 
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['fullname'] = $user['fullname'];
-            $_SESSION['role'] = 'admin';
+    $_SESSION['login_attempts'] = 0;
+    $_SESSION['user_id'] = $user['id'];
+    $_SESSION['fullname'] = $user['fullname'];
+    $_SESSION['role'] = 'admin';
+    $_SESSION['last_activity'] = time();
 
-            header("Location: dashboard.php");
-            exit();
+    header("Location: dashboard.php");
+    exit();
 
-        } else {
+} else {
             $_SESSION['login_attempts']++;
             $error = "Invalid credentials.";
         }

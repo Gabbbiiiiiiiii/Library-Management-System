@@ -1,4 +1,5 @@
 <?php
+session_start();
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -68,22 +69,22 @@ function navClass($page, $currentPage) {
             <nav class="flex items-center gap-8 h-12">
                 <a href="student_dashboard.php"
                 class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'student_dashboard' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
-                    🏠 Dashboard
+                     Dashboard
                 </a>
 
                 <a href="book_catalog.php"
                 class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'book_catalog' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
-                    📚 Book Catalog
+                     Book Catalog
                 </a>
 
                 <a href="my_borrowings.php"
                 class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'my_borrowings' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
-                    🕒 My Borrowings
+                     My Borrowings
                 </a>
 
                 <a href="reservations.php"
                 class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'reservations' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
-                    🧾 Reservations
+                     Reservations
                 </a>
             </nav>
         </div>
