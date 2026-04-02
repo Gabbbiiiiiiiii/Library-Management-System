@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . '/../includes/library_helpers.php';
 require_once "auth_check.php";
 
 $currentPage = 'manage_returns';
@@ -20,41 +21,86 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+setLibraryDbTimezone($pdo);
+
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
 
-/* ================= HELPERS ================= */
-function e($value): string {
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-}
+// /* ================= HELPERS ================= */
+// function e($value): string {
+//     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+// }
 
-function formatDateText($date): string {
-    if (empty($date) || $date === '0000-00-00') {
-        return '—';
-    }
-    return date('M d, Y', strtotime($date));
-}
+// function formatDateText($date): string {
+//     if (empty($date) || $date === '0000-00-00') {
+//         return '—';
+//     }
+//     return date('M d, Y h:i A', strtotime($date));
+// }
 
-function getDaysLate(?string $dueDate, ?string $returnDate = null): int {
-    if (empty($dueDate)) {
-        return 0;
-    }
+// function getDaysLateAdvanced(?string $dueDate, ?string $returnDate = null): int {
+//     if (empty($dueDate)) {
+//         return 0;
+//     }
 
-    $due = new DateTime($dueDate);
-    $ret = $returnDate ? new DateTime($returnDate) : new DateTime();
+//     $due = new DateTime($dueDate);
+//     $ret = $returnDate ? new DateTime($returnDate) : new DateTime();
 
-    if ($ret <= $due) {
-        return 0;
-    }
+//     if ($ret <= $due) {
+//         return 0;
+//     }
 
-    return (int) $due->diff($ret)->days;
-}
+//     $dueDay = $due->format('Y-m-d');
+//     $retDay = $ret->format('Y-m-d');
 
-function calculatePenalty(?string $dueDate, ?string $returnDate = null, float $ratePerDay = 5.00): float {
-    $daysLate = getDaysLate($dueDate, $returnDate);
-    return $daysLate * $ratePerDay;
-}
+//     if ($dueDay === $retDay) {
+//         return 0; // same-day late uses hourly fine, not day fine
+//     }
+
+//     return (new DateTime($dueDay))->diff(new DateTime($retDay))->days;
+// }
+
+// function calculatePenaltyAdvanced(?string $dueDate, ?string $returnDate = null): array {
+//     if (empty($dueDate)) {
+//         return ['penalty' => 0.00, 'remarks' => 'No due date'];
+//     }
+
+//     $due = new DateTime($dueDate);
+//     $ret = $returnDate ? new DateTime($returnDate) : new DateTime();
+
+//     if ($ret <= $due) {
+//         return ['penalty' => 0.00, 'remarks' => 'Returned on time'];
+//     }
+
+//     $dueDay = $due->format('Y-m-d');
+//     $retDay = $ret->format('Y-m-d');
+
+//     // Same day = ₱2 per hour, capped at 5:00 PM
+//     if ($dueDay === $retDay) {
+//         $closing = new DateTime($dueDay . ' 17:00:00');
+
+//         if ($ret > $closing) {
+//             $ret = $closing;
+//         }
+
+//         $secondsLate = $ret->getTimestamp() - $due->getTimestamp();
+//         $hoursLate = max(1, (int) ceil($secondsLate / 3600));
+
+//         return [
+//             'penalty' => $hoursLate * 2.00,
+//             'remarks' => "{$hoursLate} hour(s) late"
+//         ];
+//     }
+
+//     // Next day or more = ₱10 per day
+//     $daysLate = (new DateTime($dueDay))->diff(new DateTime($retDay))->days;
+
+//     return [
+//         'penalty' => $daysLate * 10.00,
+//         'remarks' => "{$daysLate} day(s) late"
+//     ];
+// }
 
 /* ================= HANDLE RETURN ================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
@@ -98,57 +144,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
     $course      = $borrowing['course'] ?: ($borrowing['user_course'] ?: null);
     $yearlvl     = $borrowing['yearlvl'] ?: ($borrowing['user_yearlvl'] ?: null);
 
-    $today    = date('Y-m-d');
-    $daysLate = getDaysLate($borrowing['dueDate'], $today);
-    $penalty  = calculatePenalty($borrowing['dueDate'], $today);
-    $remarks  = $daysLate > 0 ? "Returned {$daysLate} day(s) late" : "Returned on time";
+    $returnDateTime = date('Y-m-d H:i:s');
+
+    $penaltyInfo = calculatePenaltyAdvanced($borrowing['dueDate'], $returnDateTime);
+    $penalty = $penaltyInfo['penalty'];
+    $remarks = $penaltyInfo['remarks'];
+    $daysLate = getDaysLateAdvanced($borrowing['dueDate'], $returnDateTime);
 
     $pdo->beginTransaction();
 
     try {
         /* 1. Save return record */
         $insertReturn = $pdo->prepare("
-            INSERT INTO returns (
-                borrowing_id,
-                book_id,
-                user_id,
-                student_name,
-                student_id,
-                course,
-                yearlvl,
-                borrow_date,
-                due_date,
-                return_date,
-                days_late,
-                penalty,
-                remarks
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, ?, ?)
-        ");
+        INSERT INTO returns (
+            borrowing_id,
+            book_id,
+            user_id,
+            student_name,
+            student_id,
+            course,
+            yearlvl,
+            borrow_date,
+            due_date,
+            return_date,
+            days_late,
+            penalty,
+            remarks
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ");
 
-        $insertReturn->execute([
-            $borrowing['id'],
-            $borrowing['book_id'],
-            $borrowing['user_id'] ?: null,
-            $studentName,
-            $studentId,
-            $course,
-            $yearlvl,
-            $borrowing['borrowDate'],
-            $borrowing['dueDate'],
-            $daysLate,
-            $penalty,
-            $remarks
-        ]);
+    $insertReturn->execute([
+        $borrowing['id'],
+        $borrowing['book_id'],
+        $borrowing['user_id'] ?: null,
+        $studentName,
+        $studentId,
+        $course,
+        $yearlvl,
+        $borrowing['borrowDate'],
+        $borrowing['dueDate'],
+        $returnDateTime,
+        $daysLate,
+        $penalty,
+        $remarks
+    ]);
 
         /* 2. Mark borrowing as returned */
         $updateBorrowing = $pdo->prepare("
-            UPDATE borrowings
-            SET status = 'returned',
-                returnDate = CURDATE(),
-                penalty = ?
-            WHERE id = ?
-        ");
-        $updateBorrowing->execute([$penalty, $borrowing['id']]);
+        UPDATE borrowings
+        SET status = 'returned',
+            returnDate = ?,
+            penalty = ?
+        WHERE id = ?
+    ");
+    $updateBorrowing->execute([$returnDateTime, $penalty, $borrowing['id']]);
 
         /* 3. Increase available copies first */
         $updateBook = $pdo->prepare("
@@ -175,10 +224,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
             $markReady = $pdo->prepare("
                 UPDATE reservations
                 SET status = 'ready',
-                    expiryDate = DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+                    expiryDate = DATE_ADD(NOW(), INTERVAL 3 DAY)
                 WHERE id = ?
             ");
             $markReady->execute([$nextReservation['id']]);
+
+            $getReservationStudent = $pdo->prepare("
+                SELECT user_id, student_id, studentName, book_id
+                FROM reservations
+                WHERE id = ?
+                LIMIT 1
+            ");
+            $getReservationStudent->execute([$nextReservation['id']]);
+            $reservationStudent = $getReservationStudent->fetch(PDO::FETCH_ASSOC);
+
+            $getBookTitle = $pdo->prepare("
+                SELECT title
+                FROM books
+                WHERE id = ?
+                LIMIT 1
+            ");
+            $getBookTitle->execute([$borrowing['book_id']]);
+            $bookInfo = $getBookTitle->fetch(PDO::FETCH_ASSOC);
+
+            createNotification(
+                $pdo,
+                $reservationStudent['user_id'] ? (int)$reservationStudent['user_id'] : null,
+                $reservationStudent['student_id'] ?? null,
+                $reservationStudent['studentName'] ?? null,
+                'ready_pickup',
+                'Book Ready for Pickup',
+                'Your reserved book "' . ($bookInfo['title'] ?? 'Unknown Book') . '" is now ready for pickup.',
+                'reservations.php'
+            );
 
             /* 6. Reserve that returned copy for pickup, so stock becomes 0 again */
             $reserveCopy = $pdo->prepare("
@@ -212,7 +290,7 @@ $pdo->exec("
     SET status = 'overdue'
     WHERE status = 'borrowed'
       AND dueDate IS NOT NULL
-      AND dueDate < CURDATE()
+      AND dueDate < NOW()
       AND returnDate IS NULL
 ");
 
@@ -276,13 +354,20 @@ unset($_SESSION['success_message']);
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-7xl mx-auto p-6 mt-36">
+<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
 
     <!-- HEADER -->
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Process Returns</h1>
         <p class="text-gray-600 mt-2 text-lg">Process book returns and calculate penalties</p>
     </div>
+
+    <div class="mb-6">
+    <a href="export_returns_csv.php"
+       class="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700">
+        Export Returns CSV
+    </a>
+</div>
 
     <!-- SUCCESS MESSAGE -->
     <?php if ($successMessage !== ''): ?>
@@ -318,9 +403,10 @@ unset($_SESSION['success_message']);
                     $studentName = $row['studentName'] ?: ($row['user_fullname'] ?: 'Unknown Student');
                     $studentId   = $row['student_id'] ?: ($row['user_student_id'] ?: '—');
                     $cover       = !empty($row['book_cover']) ? $row['book_cover'] : 'https://placehold.co/80x112?text=No+Cover';
-                    $isOverdue   = getDaysLate($row['dueDate']) > 0;
-                    $penalty     = calculatePenalty($row['dueDate']);
-                    $daysLate    = getDaysLate($row['dueDate']);
+                    $currentPenaltyInfo = calculatePenaltyAdvanced($row['dueDate'], date('Y-m-d H:i:s'));
+                    $isOverdue = strtotime(date('Y-m-d H:i:s')) > strtotime($row['dueDate']);
+                    $penalty = $currentPenaltyInfo['penalty'];
+                    $daysLate = getDaysLateAdvanced($row['dueDate'], date('Y-m-d H:i:s'));
                     $modalId     = 'returnModal' . (int)$row['id'];
                 ?>
 
@@ -486,8 +572,10 @@ unset($_SESSION['success_message']);
 function openReturnModal(id) {
     const modal = document.getElementById(id);
     if (modal) {
+        const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
         modal.classList.remove('hidden');
         document.body.classList.add('overflow-hidden');
+        document.body.style.paddingRight = scrollbarWidth + 'px';
     }
 }
 
@@ -496,6 +584,7 @@ function closeReturnModal(id) {
     if (modal) {
         modal.classList.add('hidden');
         document.body.classList.remove('overflow-hidden');
+        document.body.style.paddingRight = '';
     }
 }
 

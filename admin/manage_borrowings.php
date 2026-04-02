@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . '/../includes/library_helpers.php';
 require_once "auth_check.php";
 
 $currentPage = 'manage_borrowings';
@@ -20,6 +21,8 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+setLibraryDbTimezone($pdo);
+
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
@@ -31,7 +34,7 @@ $pdo->exec("
     SET status = 'overdue'
     WHERE status = 'borrowed'
       AND dueDate IS NOT NULL
-      AND dueDate < CURDATE()
+      AND dueDate < NOW()
       AND returnDate IS NULL
 ");
 
@@ -77,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
         $updateBorrowing = $pdo->prepare("
             UPDATE borrowings
             SET status = 'returned',
-                returnDate = CURDATE(),
+                returnDate = NOW(),
                 penalty = ?
             WHERE id = ?
         ");
@@ -208,28 +211,28 @@ $stmt->execute($params);
 $borrowings = $stmt->fetchAll();
 
 /* ================= HELPERS ================= */
-function e($value): string {
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-}
+// function e($value): string {
+//     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+// }
 
-function formatDateText($date): string {
-    if (empty($date) || $date === '0000-00-00') {
-        return '—';
-    }
-    return date('M d, Y', strtotime($date));
-}
+// function formatDateText($date): string {
+//     if (empty($date) || $date === '0000-00-00') {
+//         return '—';
+//     }
+//     return date('M d, Y h:i A', strtotime($date));
+// }
 
-function getStudentDisplayName(array $row): string {
-    if (!empty($row['studentName'])) return $row['studentName'];
-    if (!empty($row['user_fullname'])) return $row['user_fullname'];
-    return 'Unknown Student';
-}
+// function getStudentDisplayName(array $row): string {
+//     if (!empty($row['studentName'])) return $row['studentName'];
+//     if (!empty($row['user_fullname'])) return $row['user_fullname'];
+//     return 'Unknown Student';
+// }
 
-function getStudentIdValue(array $row): string {
-    if (!empty($row['student_id'])) return $row['student_id'];
-    if (!empty($row['user_student_id'])) return $row['user_student_id'];
-    return '—';
-}
+// function getStudentIdValue(array $row): string {
+//     if (!empty($row['student_id'])) return $row['student_id'];
+//     if (!empty($row['user_student_id'])) return $row['user_student_id'];
+//     return '—';
+// }
 
 function getCourseValue(array $row): string {
     if (!empty($row['course'])) return $row['course'];
@@ -256,20 +259,33 @@ function getYearLevelValue(array $row): string {
 <?php include 'header.php'; ?>
 
 <!-- main page -->
-<div class="max-w-7xl mx-auto px-6 py-8 mt-36">
+<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
 
     <!-- PAGE HEADER -->
     <div class="mb-8">
         <h1 class="text-4xl font-bold text-gray-900">All Borrowings</h1>
         <p class="text-gray-600 mt-2 text-lg">View and manage all book borrowings</p>
     </div>
+    
+    <div class="mb-6">
+    <a href="export_borrowings_csv.php"
+       class="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700">
+        Export Borrowings CSV
+    </a>
+</div>
 
     <!-- STATS -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-7">
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
             <div class="flex items-center justify-between mb-8">
                 <h3 class="text-xl font-semibold text-gray-900">Active Borrowings</h3>
-                <span class="text-blue-600 text-2xl">◔</span>
+                <span class="text-blue-600 text-2xl">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                        stroke-width="1.5" stroke="currentColor" class="inline w-6 h-6">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                </span>
             </div>
             <div class="text-4xl font-bold text-gray-900"><?= e($activeCount) ?></div>
         </div>
@@ -277,7 +293,13 @@ function getYearLevelValue(array $row): string {
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
             <div class="flex items-center justify-between mb-8">
                 <h3 class="text-xl font-semibold text-gray-900">Overdue</h3>
-                <span class="text-red-500 text-2xl">◔</span>
+                <span class="text-red-500 text-2xl">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                        stroke-width="1.5" stroke="currentColor" class="inline w-6 h-6">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                </span>
             </div>
             <div class="text-4xl font-bold text-red-600"><?= e($overdueCount) ?></div>
         </div>
@@ -285,7 +307,13 @@ function getYearLevelValue(array $row): string {
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
             <div class="flex items-center justify-between mb-8">
                 <h3 class="text-xl font-semibold text-gray-900">Total Borrowings</h3>
-                <span class="text-green-600 text-2xl">◔</span>
+                <span class="text-green-600 text-2xl">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                        stroke-width="1.5" stroke="currentColor" class="inline w-6 h-6">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                </span>
             </div>
             <div class="text-4xl font-bold text-gray-900"><?= e($totalCount) ?></div>
         </div>

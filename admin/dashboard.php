@@ -1,12 +1,38 @@
 <?php
 session_start();
+require_once __DIR__ . '/../includes/library_helpers.php';
 require_once "auth_check.php";
 
 $currentPage = 'dashboard';
 
+
+// function timeAgo($datetime) {
+//     $time = time() - strtotime($datetime);
+
+//     if ($time < 60) return 'Just now';
+
+//     if ($time < 3600) {
+//         $minutes = floor($time / 60);
+//         return $minutes . ' minute' . ($minutes === 1 ? '' : 's') . ' ago';
+//     }
+
+//     if ($time < 86400) {
+//         $hours = floor($time / 3600);
+//         return $hours . ' hour' . ($hours === 1 ? '' : 's') . ' ago';
+//     }
+
+//     if ($time < 604800) {
+//         $days = floor($time / 86400);
+//         return $days . ' day' . ($days === 1 ? '' : 's') . ' ago';
+//     }
+
+//     return date("M d, Y h:i A", strtotime($datetime));
+// }
+
 /* ================= DATABASE CONNECTION ================= */
 $pdo = new PDO("mysql:host=localhost;dbname=sti_library", "root", "");
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+setLibraryDbTimezone($pdo);
 
 /* ================= FETCH DATA ================= */
 
@@ -31,7 +57,7 @@ $totalBooks = array_sum(array_column($books, 'totalCopies'));
 $availableBooks = array_sum(array_column($books, 'availableCopies'));
 
 $activeBorrowings = array_filter($borrowings, function ($b) {
-    return isset($b['status']) && $b['status'] === 'active';
+    return isset($b['status']) && $b['status'] === 'borrowed';
 });
 
 $overdueBorrowings = array_filter($activeBorrowings, function ($b) {
@@ -54,47 +80,73 @@ $totalPenalties = array_sum(array_map(function ($b) {
 
 $recentActivity = [];
 
-// Returns
-foreach ($borrowings as $b) {
-    if (!empty($b['returnDate'])) {
-        $recentActivity[] = [
-            'type' => 'return',
-            'date' => strtotime($b['returnDate']),
-            'text' => ($b['studentName'] ?? 'A student') . ' returned a book',
-        ];
-    }
-}
+// Borrowings
+$stmt = $pdo->query("
+    SELECT studentName, borrowDate, returnDate
+    FROM borrowings
+    WHERE borrowDate IS NOT NULL OR returnDate IS NOT NULL
+");
 
-// Active borrows
-foreach ($borrowings as $b) {
-    if (isset($b['status']) && $b['status'] === 'active') {
-        $recentActivity[] = [
-            'type' => 'borrow',
-            'date' => strtotime($b['borrowDate']),
-            'text' => ($b['studentName'] ?? 'A student') . ' borrowed a book',
-        ];
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $b) {
+    if (!empty($b['borrowDate'])) {
+        $timestamp = strtotime($b['borrowDate']);
+        if ($timestamp !== false) {
+            $recentActivity[] = [
+                'type' => 'borrow',
+                'date' => $timestamp,
+                'text' => ($b['studentName'] ?? 'A student') . ' borrowed a book',
+            ];
+        }
+    }
+
+    if (!empty($b['returnDate'])) {
+        $timestamp = strtotime($b['returnDate']);
+        if ($timestamp !== false) {
+            $recentActivity[] = [
+                'type' => 'return',
+                'date' => $timestamp,
+                'text' => ($b['studentName'] ?? 'A student') . ' returned a book',
+            ];
+        }
     }
 }
 
 // Reservations
-foreach ($reservations as $r) {
+$stmt = $pdo->query("
+    SELECT studentName, reservationDate
+    FROM reservations
+    WHERE reservationDate IS NOT NULL
+");
+
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
     if (!empty($r['reservationDate'])) {
-        $recentActivity[] = [
-            'type' => 'reservation',
-            'date' => strtotime($r['reservationDate']),
-            'text' => ($r['studentName'] ?? 'A student') . ' reserved a book',
-        ];
+        $timestamp = strtotime($r['reservationDate']);
+        if ($timestamp !== false) {
+            $recentActivity[] = [
+                'type' => 'reservation',
+                'date' => $timestamp,
+                'text' => ($r['studentName'] ?? 'A student') . ' reserved a book',
+            ];
+        }
     }
 }
 
-// Sort by latest date
+// Sort newest first, but reservation first if same time
 usort($recentActivity, function ($a, $b) {
-    return $b['date'] <=> $a['date'];
+    if ($b['date'] !== $a['date']) {
+        return $b['date'] <=> $a['date'];
+    }
+
+    $priority = [
+        'reservation' => 3,
+        'borrow'      => 2,
+        'return'      => 1
+    ];
+
+    return ($priority[$b['type']] ?? 0) <=> ($priority[$a['type']] ?? 0);
 });
 
-// Get latest 10
 $recentActivity = array_slice($recentActivity, 0, 10);
-
 
 /* ======================= */
 /* OTHER STATS */
@@ -120,7 +172,7 @@ $availabilityPercent = $totalBooks > 0
 <?php include 'header.php'; ?>
 
 <!-- ================= PAGE CONTENT ================= -->
-<div class="max-w-7xl mx-auto p-6 mt-36">
+<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
 
 <div class="mb-6">
     <h1 class="text-3xl font-bold text-gray-800">
@@ -218,18 +270,32 @@ foreach ($stats as $stat):
         <p class="text-gray-500 text-center py-8">No recent activity</p>
     <?php else: ?>
         <div class="space-y-4">
-        <?php foreach ($recentActivity as $activity): ?>
-            <div class="flex justify-between items-center border-b pb-3">
-                <div>
-                    <p class="text-sm font-medium text-gray-800">
-                        <?= htmlspecialchars($activity['text']) ?>
-                    </p>
-                    <p class="text-xs text-gray-500">
-                        <?= date("M d, Y h:i A", $activity['date']) ?>
-                    </p>
+            <?php foreach ($recentActivity as $activity): ?>
+                <?php
+                    $dotColor = 'bg-gray-300';
+
+                    if ($activity['type'] === 'borrow') {
+                        $dotColor = 'bg-blue-500';
+                    } elseif ($activity['type'] === 'reservation') {
+                        $dotColor = 'bg-orange-500';
+                    } elseif ($activity['type'] === 'return') {
+                        $dotColor = 'bg-green-500';
+                    }
+                ?>
+
+                <div class="flex items-start gap-4 border-b pb-3 last:border-b-0">
+                    <span class="w-2 h-2 rounded-full mt-2 shrink-0 <?= $dotColor ?>"></span>
+
+                    <div>
+                        <p class="text-sm font-medium text-gray-800">
+                            <?= htmlspecialchars($activity['text']) ?>
+                        </p>
+                        <p class="text-xs text-gray-500">
+                            <?= timeAgo(date('Y-m-d H:i:s', $activity['date'])) ?>
+                        </p>
+                    </div>
                 </div>
-            </div>
-        <?php endforeach; ?>
+            <?php endforeach; ?>
         </div>
     <?php endif; ?>
 </div>

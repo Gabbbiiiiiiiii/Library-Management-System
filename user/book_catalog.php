@@ -1,5 +1,16 @@
 <?php
 session_start();
+require_once __DIR__ . '/../includes/library_helpers.php';
+
+function highlight($text, $search) {
+    if (!$search) return e($text);
+    return preg_replace(
+        '/(' . preg_quote($search, '/') . ')/i',
+        '<span class="bg-yellow-200 px-1 rounded">$1</span>',
+        e($text)
+    );
+}
+
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'student') {
     header("Location: ../auth/student_login.php");
     exit();
@@ -18,6 +29,9 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+
+   setLibraryDbTimezone($pdo);
+
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
@@ -32,18 +46,18 @@ $userId = $_SESSION['user_id'] ?? null;
 $studentName = $_SESSION['fullname'] ?? 'Student';
 $studentId = $_SESSION['student_id'] ?? '';
 
-/* ================= HELPERS ================= */
-function e($value): string {
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-}
+// /* ================= HELPERS ================= */
+// function e($value): string {
+//     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+// }
 
-function todayDate(): string {
-    return date('Y-m-d');
-}
+// function todayDate(): string {
+//     return date('Y-m-d H:i:s');
+// }
 
-function tomorrowDate(): string {
-    return date('Y-m-d', strtotime('+1 day'));
-}
+// function tomorrowDate(): string {
+//     return date('Y-m-d 08:59:59', strtotime('+1 day')); // due
+// }
 
 /* ================= MESSAGES ================= */
 $successMessage = $_SESSION['success_message'] ?? '';
@@ -102,6 +116,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit();
     }
 
+    // 🚫 CHECK IF USER ALREADY HAS A BORROWED BOOK
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM borrowings
+        WHERE user_id = ?
+        AND status IN ('borrowed', 'overdue')
+    ");
+    $stmt->execute([$userId]);
+
+    if ($stmt->fetchColumn() > 0) {
+        $_SESSION['error_message'] = "You can only borrow 1 book at a time. Return your current book first.";
+        header("Location: book_catalog.php");
+        exit();
+    }
+
     $pdo->beginTransaction();
 
     try {
@@ -123,8 +152,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $userId,
             $studentName,
             $studentId,
-            todayDate(),
-            tomorrowDate()
+            date('Y-m-d H:i:s'),
+            date('Y-m-d 08:59:59', strtotime('+1 day'))
         ]);
 
         $updateBook = $pdo->prepare("
@@ -193,6 +222,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit();
     }
 
+    // 🚫 NEW RULE: ONLY 1 RESERVATION PER USER
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM reservations
+        WHERE user_id = ?
+        AND status IN ('pending', 'ready')
+    ");
+    $stmt->execute([$userId]);
+
+    if ($stmt->fetchColumn() > 0) {
+        $_SESSION['error_message'] = "You can only have 1 active reservation.";
+        header("Location: book_catalog.php");
+        exit();
+    }
+
     $stmt = $pdo->prepare("
         INSERT INTO reservations (
             book_id,
@@ -209,11 +253,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $userId,
         $studentName,
         $studentId,
-        todayDate(),
-        date('Y-m-d', strtotime('+3 days'))
+        date('Y-m-d H:i:s'),
+        date('Y-m-d 17:00:00', strtotime('+3 days'))
     ]);
 
-    $_SESSION['success_message'] = "Book reserved successfully! You will be notified when it is available.";
+    createNotification(
+    $pdo,
+    $userId,
+    $studentId,
+    $studentName,
+    'general',
+    'Reservation Submitted',
+    'You reserved "' . ($book['title'] ?? 'a book') . '". We will notify you when it is ready.',
+    'reservations.php'
+);
+
+$_SESSION['success_message'] = "Book reserved successfully! You will be notified when it is available.";
+
     header("Location: book_catalog.php");
     exit();
 }
@@ -345,6 +401,26 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                         </h3>
                         <p class="mt-1 text-slate-600"><?= e($book['author']) ?></p>
 
+                        <p class="text-xs text-gray-500 mt-3 font-medium">Description</p>
+
+                        <div class="mt-1 text-sm text-gray-500">
+                            <span id="short-<?= $book['id'] ?>">
+                                <?= highlight(mb_strimwidth($book['description'], 0, 120, '...'), $search ?? '') ?>
+                            </span>
+
+                            <span id="full-<?= $book['id'] ?>" class="hidden">
+                                <?= highlight($book['description'], $search ?? '') ?>
+                            </span>
+
+                            <button
+                                type="button"
+                                onclick="toggleDesc(<?= $book['id'] ?>)"
+                                class="text-blue-600 hover:underline ml-1"
+                            >
+                                Read more
+                            </button>
+                        </div>
+
                         <div class="mt-4 text-sm text-slate-500 space-y-1">
                             <p>ISBN: <?= e($book['isbn']) ?></p>
                             <p>Category: <?= e($book['category']) ?></p>
@@ -387,6 +463,13 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                                         <h4 class="font-semibold text-gray-900"><?= e($book['title']) ?></h4>
                                         <p class="text-sm text-gray-600"><?= e($book['author']) ?></p>
                                         <p class="text-xs text-gray-500 mt-2">ISBN: <?= e($book['isbn']) ?></p>
+
+                                        <!-- DESCRIPTION -->
+                                        <?php if (!empty($book['description'])): ?>
+                                            <div class="mt-3 text-sm text-gray-700 leading-relaxed max-h-24 overflow-y-auto pr-1">
+                                                <?= e($book['description']) ?>
+                                            </div>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
 
@@ -395,8 +478,9 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                                         <p class="font-semibold text-blue-900">Borrowing Terms:</p>
                                         <ul class="list-disc list-inside mt-2 text-blue-800 space-y-1">
                                             <li>Borrowing period: 1 day</li>
-                                            <li>Return by: <?= e(date('m/d/Y', strtotime('+1 day'))) ?></li>
-                                            <li>Late fee: ₱2 per hour (1-2 hrs), ₱10 per day</li>
+                                            <li>Return by: <?= e(date('m/d/Y 08:59 AM', strtotime('+1 day'))) ?></li>
+                                            <li>Late fee: ₱2 per hour after 8:59 AM until 5:00 PM only</li>
+                                            <li>Starting the next day: ₱10 per day</li>
                                         </ul>
                                     </div>
                                 <?php endif; ?>
@@ -475,6 +559,23 @@ if (searchInput) {
         }, 500); // 0.5s delay
     });
 }
+
+function toggleDesc(id) {
+    const shortText = document.getElementById('short-' + id);
+    const fullText = document.getElementById('full-' + id);
+    const btn = event.target;
+
+    if (fullText.classList.contains('hidden')) {
+        shortText.classList.add('hidden');
+        fullText.classList.remove('hidden');
+        btn.innerText = "Show less";
+    } else {
+        shortText.classList.remove('hidden');
+        fullText.classList.add('hidden');
+        btn.innerText = "Read more";
+    }
+}
+
 </script>
 
 </body>

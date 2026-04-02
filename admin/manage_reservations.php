@@ -1,5 +1,6 @@
 <?php
 session_start();
+date_default_timezone_set('Asia/Manila');
 require_once "auth_check.php";
 
 $currentPage = 'manage_reservations';
@@ -20,6 +21,8 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+$pdo->exec("SET time_zone = '+08:00'");
+
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
@@ -33,7 +36,7 @@ function formatDateText($date): string {
     if (empty($date) || $date === '0000-00-00') {
         return '—';
     }
-    return date('M d, Y', strtotime($date));
+    return date('M d, Y h:i A', strtotime($date));
 }
 
 /* ================= AUTO EXPIRE ================= */
@@ -43,7 +46,7 @@ $pdo->exec("
     SET status = 'expired'
     WHERE status IN ('pending', 'ready')
       AND expiryDate IS NOT NULL
-      AND expiryDate < CURDATE()
+      AND expiryDate < NOW()
 ");
 
 /* ================= HANDLE CANCEL ================= */
@@ -114,11 +117,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pickup_id'])) {
         die("❌ Only ready reservations can be marked as borrowed.");
     }
 
+    // 🚫 NEW RULE: MUST RETURN CURRENT BOOK FIRST
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM borrowings
+        WHERE user_id = ?
+        AND status IN ('borrowed', 'overdue')
+    ");
+    $stmt->execute([$reservation['user_id']]);
+
+    if ($stmt->fetchColumn() > 0) {
+        $_SESSION['reservation_error'] = 'Student must return current borrowed book before claiming reservation.';
+        header("Location: manage_reservations.php?tab=ready");
+        exit();
+    }
+
     $pdo->beginTransaction();
 
     try {
-        $borrowDate = date('Y-m-d');
-        $dueDate = date('Y-m-d', strtotime($borrowDate . ' +1 day'));
+        $borrowDate = date('Y-m-d H:i:s');
+        $dueDate = date('Y-m-d 08:59:59', strtotime($borrowDate . ' +1 day'));
 
         $insertBorrowing = $pdo->prepare("
             INSERT INTO borrowings (
@@ -257,7 +275,9 @@ $stmt->execute($params);
 $reservations = $stmt->fetchAll();
 
 $successMessage = $_SESSION['reservation_success'] ?? '';
-unset($_SESSION['reservation_success']);
+$errorMessage = $_SESSION['reservation_error'] ?? '';
+
+unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
 
 /* ================= DISPLAY HELPERS ================= */
 function getStudentName(array $row): string {
@@ -295,13 +315,20 @@ function getStatusBadgeClass(string $status): string {
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-7xl mx-auto p-6 mt-36">
-
+<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
+    
     <!-- PAGE HEADER -->
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Manage Reservations</h1>
         <p class="text-gray-600 mt-2 text-lg">View and manage all book reservations</p>
     </div>
+
+    <div class="mb-6">
+    <a href="export_reservations_csv.php"
+       class="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700">
+        Export Reservations CSV
+    </a>
+</div>
 
     <?php if ($successMessage !== ''): ?>
         <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
@@ -309,32 +336,57 @@ function getStatusBadgeClass(string $status): string {
         </div>
     <?php endif; ?>
 
-    <!-- STATS -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <div class="flex items-center justify-between mb-8">
-                <h3 class="text-lg font-semibold text-gray-900">Active Reservations</h3>
-                <span class="text-blue-600 text-xl">▣</span>
-            </div>
-            <div class="text-4xl font-bold text-gray-900"><?= e($activeCount) ?></div>
-        </div>
-
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <div class="flex items-center justify-between mb-8">
-                <h3 class="text-lg font-semibold text-gray-900">Ready for Pickup</h3>
-                <span class="text-green-600 text-xl">▣</span>
-            </div>
-            <div class="text-4xl font-bold text-green-600"><?= e($readyCount) ?></div>
-        </div>
-
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <div class="flex items-center justify-between mb-8">
-                <h3 class="text-lg font-semibold text-gray-900">Total Reservations</h3>
-                <span class="text-purple-600 text-xl">▣</span>
-            </div>
-            <div class="text-4xl font-bold text-gray-900"><?= e($totalCount) ?></div>
-        </div>
+    <?php if ($errorMessage !== ''): ?>
+    <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+        <?= e($errorMessage) ?>
     </div>
+    <?php endif; ?>
+    
+
+    <!-- STATS -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-8">
+            <h3 class="text-lg font-semibold text-gray-900">Active Reservations</h3>
+            <span class="text-blue-600 text-xl">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                    stroke-width="1.5" stroke="currentColor" class="inline w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+            </span>
+        </div>
+        <div class="text-4xl font-bold text-gray-900"><?= e($activeCount) ?></div>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-8">
+            <h3 class="text-lg font-semibold text-gray-900">Ready for Pickup</h3>
+            <span class="text-green-600 text-xl">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                    stroke-width="1.5" stroke="currentColor" class="inline w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+            </span>
+        </div>
+        <div class="text-4xl font-bold text-green-600"><?= e($readyCount) ?></div>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-8">
+            <h3 class="text-lg font-semibold text-gray-900">Total Reservations</h3>
+            <span class="text-purple-600 text-xl">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                    stroke-width="1.5" stroke="currentColor" class="inline w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+            </span>
+        </div>
+        <div class="text-4xl font-bold text-gray-900"><?= e($totalCount) ?></div>
+    </div>
+</div>
 
     <!-- SEARCH -->
     <form method="GET" class="mb-6">
@@ -409,7 +461,7 @@ function getStatusBadgeClass(string $status): string {
                     $studentName = getStudentName($row);
                     $studentId = getStudentId($row);
                     $cover = !empty($row['book_cover']) ? $row['book_cover'] : 'https://placehold.co/100x140?text=No+Cover';
-                    $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d')) > strtotime($row['expiryDate']);
+                    $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d H:i:s')) > strtotime($row['expiryDate']);
                 ?>
 
                 <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">

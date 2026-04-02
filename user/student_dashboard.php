@@ -1,5 +1,7 @@
 <?php
 session_start();
+require_once __DIR__ . '/../includes/library_helpers.php';
+
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'student') {
     header("Location: ../auth/student_login.php");
     exit();
@@ -18,6 +20,8 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+
+    setLibraryDbTimezone($pdo);
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
@@ -25,6 +29,7 @@ try {
 /* ================= SESSION DATA ================= */
 $studentName = $_SESSION['fullname'] ?? 'Student';
 $studentId   = $_SESSION['student_id'] ?? '';
+$userId      = $_SESSION['user_id'] ?? null;
 
 /* ================= AUTO UPDATE OVERDUE ================= */
 $pdo->exec("
@@ -32,7 +37,7 @@ $pdo->exec("
     SET status = 'overdue'
     WHERE status = 'borrowed'
       AND dueDate IS NOT NULL
-      AND dueDate < CURDATE()
+      AND dueDate < NOW()
       AND returnDate IS NULL
 ");
 
@@ -41,18 +46,21 @@ $activeBorrowings = 0;
 $activeReservations = 0;
 $overdueBooks = 0;
 $currentBorrowings = [];
+$readyReservations = [];
 
 /* Active Borrowings */
 $stmt = $pdo->prepare("
     SELECT COUNT(*)
     FROM borrowings
     WHERE (
-        student_id = :student_id
+        user_id = :user_id
+        OR student_id = :student_id
         OR studentName = :student_name
     )
     AND status = 'borrowed'
 ");
 $stmt->execute([
+    ':user_id' => $userId,
     ':student_id' => $studentId,
     ':student_name' => $studentName
 ]);
@@ -63,12 +71,14 @@ $stmt = $pdo->prepare("
     SELECT COUNT(*)
     FROM borrowings
     WHERE (
-        student_id = :student_id
+        user_id = :user_id
+        OR student_id = :student_id
         OR studentName = :student_name
     )
     AND status = 'overdue'
 ");
 $stmt->execute([
+    ':user_id' => $userId,
     ':student_id' => $studentId,
     ':student_name' => $studentName
 ]);
@@ -79,16 +89,42 @@ $stmt = $pdo->prepare("
     SELECT COUNT(*)
     FROM reservations
     WHERE (
-        student_id = :student_id
+        user_id = :user_id
+        OR student_id = :student_id
         OR studentName = :student_name
     )
     AND status IN ('pending', 'ready')
 ");
 $stmt->execute([
+    ':user_id' => $userId,
     ':student_id' => $studentId,
     ':student_name' => $studentName
 ]);
 $activeReservations = (int)$stmt->fetchColumn();
+
+/* Ready for Pickup Reservations */
+$stmt = $pdo->prepare("
+    SELECT
+        r.*,
+        bk.title,
+        bk.author,
+        bk.coverImage
+    FROM reservations r
+    LEFT JOIN books bk ON bk.id = r.book_id
+    WHERE (
+        r.user_id = :user_id
+        OR r.student_id = :student_id
+        OR r.studentName = :student_name
+    )
+    AND r.status = 'ready'
+    ORDER BY r.expiryDate ASC, r.id ASC
+");
+$stmt->execute([
+    ':user_id' => $userId,
+    ':student_id' => $studentId,
+    ':student_name' => $studentName
+]);
+$readyReservations = $stmt->fetchAll();
 
 /* Current Borrowings List */
 $stmt = $pdo->prepare("
@@ -101,29 +137,19 @@ $stmt = $pdo->prepare("
     FROM borrowings b
     LEFT JOIN books bk ON bk.id = b.book_id
     WHERE (
-        b.student_id = :student_id
+        b.user_id = :user_id
+        OR b.student_id = :student_id
         OR b.studentName = :student_name
     )
     AND b.status IN ('borrowed', 'overdue')
     ORDER BY b.borrowDate DESC, b.id DESC
 ");
 $stmt->execute([
+    ':user_id' => $userId,
     ':student_id' => $studentId,
     ':student_name' => $studentName
 ]);
 $currentBorrowings = $stmt->fetchAll();
-
-/* ================= HELPERS ================= */
-function e($value): string {
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-}
-
-function formatDateText($date): string {
-    if (empty($date) || $date === '0000-00-00') {
-        return '—';
-    }
-    return date('M d, Y', strtotime($date));
-}
 ?>
 
 <?php include 'header.php'; ?>
@@ -139,6 +165,63 @@ function formatDateText($date): string {
             Student ID: <?= e($studentId ?: '—') ?>
         </p>
     </section>
+
+    <!-- READY FOR PICKUP BANNER -->
+    <?php if (!empty($readyReservations)): ?>
+        <section class="mb-6 rounded-2xl border border-green-200 bg-green-50 p-5 shadow-sm">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-green-900">📚 Ready for Pickup</h2>
+                    <p class="mt-1 text-green-800">
+                        You have <?= count($readyReservations) ?> reservation<?= count($readyReservations) > 1 ? 's' : '' ?> ready to pick up.
+                    </p>
+
+                    <div class="mt-4 space-y-2">
+                        <?php foreach ($readyReservations as $reservation): ?>
+                            <div class="rounded-xl border border-green-200 bg-white px-4 py-3">
+                                <p class="font-semibold text-slate-900">
+                                    <?= e($reservation['title'] ?: 'Unknown Book') ?>
+                                </p>
+                                <p class="text-sm text-slate-600">
+                                    <?= e($reservation['author'] ?: 'Unknown Author') ?>
+                                </p>
+                                <p class="mt-1 text-sm text-green-800">
+                                    Pick up before: <?= e(formatDateText($reservation['expiryDate'])) ?>
+                                </p>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <a href="reservations.php"
+                   class="shrink-0 rounded-xl bg-green-600 px-4 py-2 text-white hover:bg-green-700">
+                    View Reservations
+                </a>
+            </div>
+        </section>
+    <?php endif; ?>
+
+    <!-- OVERDUE WARNING BANNER -->
+    <?php if ($overdueBooks > 0): ?>
+        <section class="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5 shadow-sm">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-red-900">⚠ Overdue Warning</h2>
+                    <p class="mt-1 text-red-800">
+                        You currently have <?= e($overdueBooks) ?> overdue book<?= $overdueBooks > 1 ? 's' : '' ?>.
+                    </p>
+                    <p class="mt-2 text-sm text-red-700">
+                        Please return overdue books as soon as possible to avoid additional penalties.
+                    </p>
+                </div>
+
+                <a href="my_borrowings.php?tab=active"
+                   class="shrink-0 rounded-xl bg-red-600 px-4 py-2 text-white hover:bg-red-700">
+                    View Borrowings
+                </a>
+            </div>
+        </section>
+    <?php endif; ?>
 
     <!-- STATS -->
     <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -182,9 +265,15 @@ function formatDateText($date): string {
         <?php else: ?>
             <div class="mt-6 space-y-4">
                 <?php foreach ($currentBorrowings as $row): ?>
-                    <?php $cover = !empty($row['coverImage']) 
-                    ? '/library-management-system/admin/' . ltrim($row['coverImage'], '/')
-                    : 'https://placehold.co/90x125?text=No+Cover'; ?>
+                    <?php
+                        $cover = !empty($row['coverImage']) 
+                            ? '/library-management-system/admin/' . ltrim($row['coverImage'], '/')
+                            : 'https://placehold.co/90x125?text=No+Cover';
+
+                        $isOverdueRow = (($row['status'] ?? '') === 'overdue') || isOverdue($row['dueDate'] ?? null, $row['returnDate'] ?? null);
+                        $penaltyInfo = calculatePenaltyAdvanced($row['dueDate'] ?? null, nowDateTime());
+                        $currentPenalty = $penaltyInfo['penalty'];
+                    ?>
                     <div class="border border-gray-200 rounded-2xl p-4 flex flex-col md:flex-row gap-4">
                         <img src="<?= e($cover) ?>"
                              alt="Book Cover"
@@ -199,7 +288,7 @@ function formatDateText($date): string {
                                     <p class="text-slate-600"><?= e($row['author'] ?: 'Unknown Author') ?></p>
                                 </div>
 
-                                <?php if ($row['status'] === 'overdue'): ?>
+                                <?php if ($isOverdueRow): ?>
                                     <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
                                         Overdue
                                     </span>
@@ -221,16 +310,19 @@ function formatDateText($date): string {
                                 </div>
                                 <div>
                                     <p class="text-slate-500">Due Date</p>
-                                    <p class="font-medium <?= $row['status'] === 'overdue' ? 'text-red-600' : 'text-slate-900' ?>">
+                                    <p class="font-medium <?= $isOverdueRow ? 'text-red-600' : 'text-slate-900' ?>">
                                         <?= e(formatDateText($row['dueDate'])) ?>
                                     </p>
                                 </div>
                             </div>
 
-                            <?php if ((float)$row['penalty'] > 0): ?>
+                            <?php if ($currentPenalty > 0): ?>
                                 <div class="mt-4 text-red-600 font-medium">
-                                    Penalty: ₱<?= number_format((float)$row['penalty'], 2) ?>
+                                    Current Penalty: ₱<?= number_format((float)$currentPenalty, 2) ?>
                                 </div>
+                                <p class="mt-1 text-sm text-red-500">
+                                    <?= e($penaltyInfo['remarks']) ?>
+                                </p>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -245,13 +337,15 @@ function formatDateText($date): string {
 
         <div class="space-y-4 text-lg text-slate-900">
             <p><span class="font-bold">Borrowing Period:</span> 1 day only</p>
+            <p><span class="font-bold">Due Time:</span> 8:59 AM next day</p>
             <p><span class="font-bold">Library Hours:</span> Monday - Saturday, 5:00 AM - 5:00 PM</p>
 
             <div>
                 <p class="font-bold mb-2">Late Fees:</p>
                 <ul class="list-disc pl-8 text-slate-700 space-y-1">
-                    <li>1-2 hours late: ₱2 per hour</li>
-                    <li>1 day or more late: ₱10 per day</li>
+                    <li>Same-day late return after 8:59 AM: ₱2 per hour</li>
+                    <li>Hourly penalty only counts until 5:00 PM</li>
+                    <li>Starting the next day: ₱10 per day</li>
                 </ul>
             </div>
         </div>

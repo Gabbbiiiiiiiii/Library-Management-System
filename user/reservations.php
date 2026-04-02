@@ -1,5 +1,10 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once __DIR__ . '/../includes/library_helpers.php';
+
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'student') {
     header("Location: ../auth/student_login.php");
     exit();
@@ -18,6 +23,8 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+setLibraryDbTimezone($pdo);
+
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
@@ -32,17 +39,35 @@ $userId = $_SESSION['user_id'] ?? null;
 $studentName = $_SESSION['fullname'] ?? 'Student';
 $studentId = $_SESSION['student_id'] ?? '';
 
-/* ================= HELPERS ================= */
-function e($value): string {
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-}
+/* ================= MARK NOTIFICATIONS READ ================= */
+$stmt = $pdo->prepare("
+    UPDATE notifications
+    SET is_read = 1, read_at = NOW()
+    WHERE (
+        user_id = :user_id
+        OR student_id = :student_id
+        OR student_name = :student_name
+    )
+    AND link = 'reservations.php'
+    AND is_read = 0
+");
+$stmt->execute([
+    ':user_id' => $userId,
+    ':student_id' => $studentId,
+    ':student_name' => $studentName
+]);
 
-function formatDateText($date): string {
-    if (empty($date) || $date === '0000-00-00') {
-        return '—';
-    }
-    return date('M d, Y', strtotime($date));
-}
+/* ================= HELPERS ================= */
+// function e($value): string {
+//     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+// }
+
+// function formatDateText($date): string {
+//     if (empty($date) || $date === '0000-00-00') {
+//         return '—';
+//     }
+//     return date('M d, Y h:i A', strtotime($date));
+// }
 
 function statusBadgeClass(string $status): string {
     return match ($status) {
@@ -72,7 +97,7 @@ $pdo->exec("
     SET status = 'expired'
     WHERE status IN ('pending', 'ready')
       AND expiryDate IS NOT NULL
-      AND expiryDate < CURDATE()
+      AND expiryDate < NOW()
 ");
 
 /* ================= HANDLE CANCEL ================= */
@@ -242,7 +267,7 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
                             ? '/library-management-system/admin/' . ltrim($row['coverImage'], '/')
                             : 'https://placehold.co/100x140?text=No+Cover';
 
-                        $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d')) > strtotime($row['expiryDate']);
+                        $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d H:i:s')) > strtotime($row['expiryDate']);
                     ?>
                     <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                         <div class="flex space-x-4">
@@ -292,9 +317,16 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
                                 </div>
 
                                 <?php if ($row['status'] === 'ready'): ?>
-                                    <div class="p-2 bg-green-50 rounded-lg text-sm text-green-800">
-                                        <p class="font-medium">Book is ready for pickup!</p>
-                                        <p class="text-xs">Please visit the library before <?= e(formatDateText($row['expiryDate'])) ?>.</p>
+                                    <div class="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800 flex items-start gap-2">
+                                        <span class="text-lg">📚</span>
+                                        <div>
+                                            <p class="font-semibold">Ready for Pickup</p>
+                                            <p class="text-xs">Pick up before <?= e(formatDateText($row['expiryDate'])) ?></p>
+
+                                            <p class="text-xs text-gray-500 mt-1">
+                                                <?= e(timeAgo($row['expiryDate'])) ?> remaining
+                                            </p>
+                                        </div>
                                     </div>
                                 <?php endif; ?>
                             </div>
@@ -323,7 +355,7 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
                             ? '/library-management-system/admin/' . ltrim($row['coverImage'], '/')
                             : 'https://placehold.co/100x140?text=No+Cover';
 
-                        $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d')) > strtotime($row['expiryDate']);
+                        $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d H:i:s')) > strtotime($row['expiryDate']);
                     ?>
                     <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                         <div class="flex space-x-4">

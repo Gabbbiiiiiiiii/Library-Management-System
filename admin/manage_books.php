@@ -279,7 +279,8 @@ $books = $stmt->fetchAll();
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-7xl mx-auto p-6 mt-36">
+<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
+    
 
 <!-- TITLE + ADD BUTTON -->
 <div class="flex justify-between items-center mb-6">

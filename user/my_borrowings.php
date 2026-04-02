@@ -1,5 +1,7 @@
 <?php
 session_start();
+require_once __DIR__ . '/../includes/library_helpers.php';
+
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'student') {
     header("Location: ../auth/student_login.php");
     exit();
@@ -18,6 +20,8 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+setLibraryDbTimezone($pdo);
+
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
@@ -27,37 +31,37 @@ $userId = $_SESSION['user_id'] ?? null;
 $studentName = $_SESSION['fullname'] ?? 'Student';
 $studentId = $_SESSION['student_id'] ?? '';
 
-/* ================= HELPERS ================= */
-function e($value): string {
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-}
+// /* ================= HELPERS ================= */
+// function e($value): string {
+//     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+// }
 
-function formatDateText($date): string {
-    if (empty($date) || $date === '0000-00-00') {
-        return '—';
-    }
-    return date('M d, Y', strtotime($date));
-}
+// function formatDateText($date): string {
+//     if (empty($date) || $date === '0000-00-00') {
+//         return '—';
+//     }
+//     return date('M d, Y h:i A', strtotime($date));
+// }
 
-function calculateCurrentPenalty(array $row): float {
-    if (!in_array($row['status'], ['borrowed', 'overdue'], true)) {
-        return (float)($row['penalty'] ?? 0);
-    }
+// function calculateCurrentPenalty(array $row): float {
+//     if (!in_array($row['status'], ['borrowed', 'overdue'], true)) {
+//         return (float)($row['penalty'] ?? 0);
+//     }
 
-    if (empty($row['dueDate'])) {
-        return 0.00;
-    }
+//     if (empty($row['dueDate'])) {
+//         return 0.00;
+//     }
 
-    $due = strtotime($row['dueDate']);
-    $today = strtotime(date('Y-m-d'));
+//     $due = strtotime($row['dueDate']);
+//     $today = strtotime(date('Y-m-d H:i:s'));
 
-    if ($today <= $due) {
-        return 0.00;
-    }
+//     if ($today <= $due) {
+//         return 0.00;
+//     }
 
-    $daysLate = (int) floor(($today - $due) / 86400);
-    return $daysLate * 10.00;
-}
+//     $daysLate = (int) floor(($today - $due) / 86400);
+//     return $daysLate * 10.00;
+// }
 
 /* ================= AUTO UPDATE OVERDUE ================= */
 $pdo->exec("
@@ -65,7 +69,7 @@ $pdo->exec("
     SET status = 'overdue'
     WHERE status = 'borrowed'
       AND dueDate IS NOT NULL
-      AND dueDate < CURDATE()
+      AND dueDate < NOW()
       AND returnDate IS NULL
 ");
 
@@ -159,8 +163,9 @@ usort($returnedBorrowings, function ($a, $b) {
                             ? '/library-management-system/admin/' . ltrim($row['coverImage'], '/')
                             : 'https://placehold.co/100x140?text=No+Cover';
 
-                        $isOverdue = $row['status'] === 'overdue';
-                        $currentPenalty = calculateCurrentPenalty($row);
+                        $isOverdue = isOverdue($row['dueDate'] ?? null) || (($row['status'] ?? '') === 'overdue');
+                        $penaltyInfo = calculatePenaltyAdvanced($row['dueDate'] ?? null, nowDateTime());
+                        $currentPenalty = $penaltyInfo['penalty'];
                     ?>
                     <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
                         <div class="flex flex-col md:flex-row gap-4">
