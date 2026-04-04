@@ -354,7 +354,7 @@ unset($_SESSION['success_message']);
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
+<div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
 
     <!-- HEADER -->
     <div class="mb-8">

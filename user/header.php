@@ -51,7 +51,7 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
 <body class="bg-gray-100">
 
 <header class="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50 shadow-sm">
-    <div class="max-w-7xl mx-auto px-6">
+    <div class="max-w-[1489px] mx-auto px-6">
         <div class="flex items-center justify-between h-20">
             
             <div class="flex items-center gap-4">
@@ -131,9 +131,10 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
         </div>
     </div>
 
-    <div class="border-t border-gray-100">
-        <div class="max-w-7xl mx-auto px-6">
-            <nav class="flex items-center gap-8 h-12">
+    <!-- ================= NAVIGATION ================= -->
+    <div class="border-t bg-gray-50">
+        <div class="max-w-[1489px] mx-auto px-6">
+            <nav class="flex gap-8 text-sm font-medium">
                 <a href="student_dashboard.php"
                    class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'student_dashboard' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
                     Dashboard

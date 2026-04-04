@@ -259,7 +259,7 @@ function getYearLevelValue(array $row): string {
 <?php include 'header.php'; ?>
 
 <!-- main page -->
-<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
+<div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
 
     <!-- PAGE HEADER -->
     <div class="mb-8">

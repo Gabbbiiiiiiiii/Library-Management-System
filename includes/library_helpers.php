@@ -94,9 +94,18 @@ if (!defined('LIBRARY_HELPERS_LOADED')) {
         return date('Y-m-d 08:59:59', strtotime('+1 day'));
     }
 
-    function nextReservationExpiryDateTime(int $days = 3): string
-    {
-        return date('Y-m-d 17:00:00', strtotime('+' . $days . ' days'));
+    function nextReservationExpiryDateTime(int $days = 3): string {
+        $date = new DateTime();
+
+        // If past 5PM, start from tomorrow
+        if ((int)$date->format('H') >= 17) {
+            $date->modify('+1 day');
+        }
+
+        $date->modify("+{$days} days");
+        $date->setTime(17, 0, 0);
+
+        return $date->format('Y-m-d H:i:s');
     }
 
     function isOverdue(?string $dueDate, ?string $returnDate = null): bool

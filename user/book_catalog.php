@@ -257,16 +257,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         date('Y-m-d 17:00:00', strtotime('+3 days'))
     ]);
 
-    createNotification(
-    $pdo,
-    $userId,
-    $studentId,
-    $studentName,
-    'general',
-    'Reservation Submitted',
-    'You reserved "' . ($book['title'] ?? 'a book') . '". We will notify you when it is ready.',
-    'reservations.php'
-);
+//     createNotification(
+//     $pdo,
+//     $userId,
+//     $studentId,
+//     $studentName,
+//     'general',
+//     'Reservation Submitted',
+//     'You reserved "' . ($book['title'] ?? 'a book') . '". We will notify you when it is ready.',
+//     'reservations.php'
+// );
 
 $_SESSION['success_message'] = "Book reserved successfully! You will be notified when it is available.";
 
@@ -309,7 +309,7 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
 
 <?php include 'header.php'; ?>
 
-<main class="max-w-7xl mx-auto px-6 pt-40 pb-10">
+<main class="max-w-[1489px] mx-auto px-6 pt-40 pb-10">
 
     <!-- PAGE HEADER -->
     <section class="mb-8">
@@ -430,9 +430,12 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                         <button
                             type="button"
                             onclick="openBookModal('<?= e($modalId) ?>')"
-                            class="mt-5 w-full bg-blue-950 text-white rounded-xl px-4 py-3 font-semibold hover:bg-blue-900"
+                            class="mt-5 w-full rounded-xl px-4 py-3 font-semibold text-white
+                            <?= $isAvailable 
+                                ? 'bg-blue-950 hover:bg-blue-900' 
+                                : 'bg-orange-500 hover:bg-orange-600' ?>"
                         >
-                            <?= $isAvailable ? '📖 Borrow' : 'Reserve' ?>
+                            <?= $isAvailable ? 'Borrow' : 'Reserve' ?>
                         </button>
                     </div>
                 </div>

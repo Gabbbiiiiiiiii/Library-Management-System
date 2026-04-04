@@ -34,6 +34,16 @@ $pdo = new PDO("mysql:host=localhost;dbname=sti_library", "root", "");
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 setLibraryDbTimezone($pdo);
 
+/* ================= AUTO UPDATE OVERDUE ================= */
+$pdo->exec("
+    UPDATE borrowings
+    SET status = 'overdue'
+    WHERE status = 'borrowed'
+      AND dueDate IS NOT NULL
+      AND dueDate < NOW()
+      AND returnDate IS NULL
+");
+
 /* ================= FETCH DATA ================= */
 
 // Books
@@ -56,13 +66,40 @@ $reservations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 $totalBooks = array_sum(array_column($books, 'totalCopies'));
 $availableBooks = array_sum(array_column($books, 'availableCopies'));
 
-$activeBorrowings = array_filter($borrowings, function ($b) {
-    return isset($b['status']) && $b['status'] === 'borrowed';
-});
+/* ACTIVE BORROWINGS */
+$stmt = $pdo->prepare("
+    SELECT COUNT(*) 
+    FROM borrowings
+    WHERE status = 'borrowed'
+");
+$stmt->execute();
+$activeBorrowingsCount = (int) $stmt->fetchColumn();
 
-$overdueBorrowings = array_filter($activeBorrowings, function ($b) {
-    return isset($b['dueDate']) && strtotime($b['dueDate']) < time();
-});
+/* OVERDUE BOOKS */
+$stmt = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM borrowings
+    WHERE status = 'overdue'
+");
+$stmt->execute();
+$overdueBorrowingsCount = (int) $stmt->fetchColumn();
+
+/* Optional arrays if needed elsewhere */
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM borrowings
+    WHERE status = 'borrowed'
+");
+$stmt->execute();
+$activeBorrowings = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+$stmt = $pdo->prepare("
+    SELECT *
+    FROM borrowings
+    WHERE status = 'overdue'
+");
+$stmt->execute();
+$overdueBorrowings = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
 $activeReservations = array_filter($reservations, function ($r) {
     return isset($r['status']) &&
@@ -172,7 +209,7 @@ $availabilityPercent = $totalBooks > 0
 <?php include 'header.php'; ?>
 
 <!-- ================= PAGE CONTENT ================= -->
-<div class="max-w-7xl mx-auto px-6 pt-32 pb-10">
+<div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
 
 <div class="mb-6">
     <h1 class="text-3xl font-bold text-gray-800">
@@ -206,7 +243,7 @@ $stats = [
     ],
     [
         "Active Borrowings",
-        count($activeBorrowings),
+        $activeBorrowingsCount,
         '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <circle cx="12" cy="12" r="10" stroke-width="2"/>
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>
@@ -215,7 +252,7 @@ $stats = [
     ],
     [
         "Overdue Books",
-        count($overdueBorrowings),
+        $overdueBorrowingsCount,
         '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86l-7.4 12.8A1 1 0 003.74 18h16.52a1 1 0 00.85-1.54l-7.4-12.8a1 1 0 00-1.72 0z"/>
         </svg>',

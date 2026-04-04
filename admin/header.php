@@ -6,7 +6,7 @@ if (!isset($currentPage)) {
 ?>
 
 <header class="fixed top-0 left-0 w-full bg-white shadow-sm border-b z-50">
-    <div class="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+    <div class="max-w-[1489px] mx-auto px-6 py-4 flex justify-between items-center">
 
         <!-- Left: Logo + Title -->
         <div class="flex items-center gap-4">
@@ -35,7 +35,7 @@ if (!isset($currentPage)) {
 
     <!-- ================= NAVIGATION ================= -->
     <div class="border-t bg-gray-50">
-        <div class="max-w-7xl mx-auto px-6">
+        <div class="max-w-[1489px] mx-auto px-6">
             <nav class="flex gap-8 text-sm font-medium">
 
                 <a href="dashboard.php"
@@ -71,6 +71,13 @@ if (!isset($currentPage)) {
                         ? 'border-purple-600 text-purple-600'
                         : 'border-transparent hover:text-purple-600 hover:border-purple-600' ?>">
                      Reservations
+                </a>
+
+                <a href="reports.php"
+                class="py-4 border-b-2 transition <?= $currentPage === 'reports'
+                        ? 'border-purple-600 text-purple-600'
+                        : 'border-transparent hover:text-purple-600 hover:border-purple-600' ?>">
+                     Reports
                 </a>
 
             </nav>

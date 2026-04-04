@@ -92,13 +92,76 @@ function statusLabel(string $status): string {
 }
 
 /* ================= AUTO EXPIRE ================= */
-$pdo->exec("
-    UPDATE reservations
-    SET status = 'expired'
+$expireStmt = $pdo->prepare("
+    SELECT id, book_id, user_id, student_id, studentName, status
+    FROM reservations
     WHERE status IN ('pending', 'ready')
       AND expiryDate IS NOT NULL
       AND expiryDate < NOW()
+    ORDER BY expiryDate ASC, id ASC
 ");
+$expireStmt->execute();
+$expiredReservations = $expireStmt->fetchAll();
+
+foreach ($expiredReservations as $expiredReservation) {
+    $pdo->beginTransaction();
+
+    try {
+        $updateExpired = $pdo->prepare("
+            UPDATE reservations
+            SET status = 'expired'
+            WHERE id = ?
+        ");
+        $updateExpired->execute([$expiredReservation['id']]);
+
+        if ($expiredReservation['status'] === 'ready') {
+            $nextStmt = $pdo->prepare("
+                SELECT id, user_id, student_id, studentName
+                FROM reservations
+                WHERE book_id = ?
+                  AND status = 'pending'
+                ORDER BY reservationDate ASC, id ASC
+                LIMIT 1
+            ");
+            $nextStmt->execute([$expiredReservation['book_id']]);
+            $nextReservation = $nextStmt->fetch();
+
+            if ($nextReservation) {
+                $newExpiryDate = nextReservationExpiryDateTime(3);
+                $readyStmt = $pdo->prepare("
+                    UPDATE reservations
+                    SET status = 'ready',
+                        expiryDate = ?
+                    WHERE id = ?
+                ");
+                $readyStmt->execute([$newExpiryDate, $nextReservation['id']]);
+
+                createNotification(
+                    $pdo,
+                    $nextReservation['user_id'] ?: null,
+                    $nextReservation['student_id'] ?: null,
+                    $nextReservation['studentName'] ?: null,
+                    'general',
+                    'Book Ready for Pickup',
+                    'Your reserved book is now available and ready for pickup.',
+                    'reservations.php'
+                );
+            } else {
+                $bookUpdate = $pdo->prepare("
+                    UPDATE books
+                    SET availableCopies = availableCopies + 1
+                    WHERE id = ?
+                      AND availableCopies < totalCopies
+                ");
+                $bookUpdate->execute([$expiredReservation['book_id']]);
+            }
+        }
+
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+    }
+}
 
 /* ================= HANDLE CANCEL ================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_id'])) {
@@ -116,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_id'])) {
     }
 
     $stmt = $pdo->prepare("
-        SELECT id, status, user_id, student_id, studentName
+        SELECT id, book_id, status, user_id, student_id, studentName
         FROM reservations
         WHERE id = ?
         LIMIT 1
@@ -153,14 +216,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_id'])) {
         exit();
     }
 
-    $stmt = $pdo->prepare("
-        UPDATE reservations
-        SET status = 'cancelled'
-        WHERE id = ?
-    ");
-    $stmt->execute([$cancelId]);
+    $pdo->beginTransaction();
 
-    $_SESSION['reservation_success'] = 'Reservation cancelled successfully.';
+    try {
+        $stmt = $pdo->prepare("
+            UPDATE reservations
+            SET status = 'cancelled'
+            WHERE id = ?
+        ");
+        $stmt->execute([$cancelId]);
+
+        if ($reservation['status'] === 'ready') {
+            $nextStmt = $pdo->prepare("
+                SELECT id, user_id, student_id, studentName
+                FROM reservations
+                WHERE book_id = ?
+                  AND status = 'pending'
+                ORDER BY reservationDate ASC, id ASC
+                LIMIT 1
+            ");
+            $nextStmt->execute([$reservation['book_id']]);
+            $nextReservation = $nextStmt->fetch();
+
+            if ($nextReservation) {
+                $newExpiryDate = nextReservationExpiryDateTime(3);
+
+                $readyStmt = $pdo->prepare("
+                    UPDATE reservations
+                    SET status = 'ready',
+                        expiryDate = ?
+                    WHERE id = ?
+                ");
+                $readyStmt->execute([$newExpiryDate, $nextReservation['id']]);
+
+                createNotification(
+                    $pdo,
+                    $nextReservation['user_id'] ?: null,
+                    $nextReservation['student_id'] ?: null,
+                    $nextReservation['studentName'] ?: null,
+                    'general',
+                    'Book Ready for Pickup',
+                    'Your reserved book is now available and ready for pickup.',
+                    'reservations.php'
+                );
+            } else {
+                $bookUpdate = $pdo->prepare("
+                    UPDATE books
+                    SET availableCopies = availableCopies + 1
+                    WHERE id = ?
+                      AND availableCopies < totalCopies
+                ");
+                $bookUpdate->execute([$reservation['book_id']]);
+            }
+        }
+
+        $pdo->commit();
+        $_SESSION['reservation_success'] = 'Reservation cancelled successfully.';
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        $_SESSION['reservation_error'] = 'Failed to cancel reservation.';
+    }
+
     header("Location: reservations.php");
     exit();
 }
@@ -222,7 +338,7 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
 
 <?php include 'header.php'; ?>
 
-<main class="max-w-7xl mx-auto px-6 pt-40 pb-10">
+<main class="max-w-[1489px] mx-auto px-6 pt-40 pb-10">
 
     <!-- PAGE HEADER -->
     <section class="mb-8">

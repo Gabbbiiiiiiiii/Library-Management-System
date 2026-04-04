@@ -125,7 +125,7 @@ usort($returnedBorrowings, function ($a, $b) {
 
 <?php include 'header.php'; ?>
 
-<main class="max-w-7xl mx-auto px-6 pt-40 pb-10">
+<main class="max-w-[1489px] mx-auto px-6 pt-40 pb-10">
 
     <!-- PAGE HEADER -->
     <section class="mb-8">

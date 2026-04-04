@@ -154,7 +154,7 @@ $currentBorrowings = $stmt->fetchAll();
 
 <?php include 'header.php'; ?>
 
-<main class="max-w-7xl mx-auto px-6 pt-40 pb-10">
+<main class="max-w-[1489px] mx-auto px-6 pt-40 pb-10">
 
     <!-- WELCOME -->
     <section class="mb-8">
@@ -223,35 +223,66 @@ $currentBorrowings = $stmt->fetchAll();
         </section>
     <?php endif; ?>
 
-    <!-- STATS -->
-    <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm">
-            <div class="flex items-center justify-between mb-8">
-                <h3 class="text-xl font-semibold text-slate-900">Active Borrowings</h3>
-                <span class="text-blue-600 text-2xl">◔</span>
-            </div>
-            <div class="text-5xl font-bold text-slate-900"><?= e($activeBorrowings) ?></div>
-            <p class="mt-2 text-slate-500 text-lg">Currently borrowed books</p>
+   <!-- ================= STATS ================= -->
+<section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    
+    <div class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm">
+        <div class="flex items-center justify-between mb-8">
+            <h3 class="text-xl font-semibold text-slate-900">Active Borrowings</h3>
+
+            <!-- REPLACED -->
+            <span class="text-blue-600 text-2xl">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                     stroke-width="1.5" stroke="currentColor" class="w-6 h-6 inline">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+            </span>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm">
-            <div class="flex items-center justify-between mb-8">
-                <h3 class="text-xl font-semibold text-slate-900">Active Reservations</h3>
-                <span class="text-green-600 text-2xl">▣</span>
-            </div>
-            <div class="text-5xl font-bold text-slate-900"><?= e($activeReservations) ?></div>
-            <p class="mt-2 text-slate-500 text-lg">Reserved books</p>
+        <div class="text-5xl font-bold text-slate-900"><?= e($activeBorrowings) ?></div>
+        <p class="mt-2 text-slate-500 text-lg">Currently borrowed books</p>
+    </div>
+
+
+    <div class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm">
+        <div class="flex items-center justify-between mb-8">
+            <h3 class="text-xl font-semibold text-slate-900">Active Reservations</h3>
+
+            <!-- REPLACED -->
+            <span class="text-green-600 text-2xl">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                     stroke-width="1.5" stroke="currentColor" class="w-6 h-6 inline">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M16.5 3.75V16.5L12 14.25 7.5 16.5V3.75m9 0H18A2.25 2.25 0 0 1 20.25 6v12A2.25 2.25 0 0 1 18 20.25H6A2.25 2.25 0 0 1 3.75 18V6A2.25 2.25 0 0 1 6 3.75h1.5m9 0h-9" />
+                </svg>
+            </span>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm">
-            <div class="flex items-center justify-between mb-8">
-                <h3 class="text-xl font-semibold text-slate-900">Overdue Books</h3>
-                <span class="text-red-500 text-2xl">!</span>
-            </div>
-            <div class="text-5xl font-bold text-red-600"><?= e($overdueBooks) ?></div>
-            <p class="mt-2 text-slate-500 text-lg">Books past due date</p>
+        <div class="text-5xl font-bold text-slate-900"><?= e($activeReservations) ?></div>
+        <p class="mt-2 text-slate-500 text-lg">Reserved books</p>
+    </div>
+
+
+    <div class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm">
+        <div class="flex items-center justify-between mb-8">
+            <h3 class="text-xl font-semibold text-slate-900">Overdue Books</h3>
+
+            <!-- REPLACED -->
+            <span class="text-red-500 text-2xl">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                     stroke-width="1.5" stroke="currentColor" class="w-6 h-6 inline">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+            </span>
         </div>
-    </section>
+
+        <div class="text-5xl font-bold text-red-600"><?= e($overdueBooks) ?></div>
+        <p class="mt-2 text-slate-500 text-lg">Books past due date</p>
+    </div>
+
+</section>
 
     <!-- CURRENT BORROWINGS -->
     <section class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm mb-8">
