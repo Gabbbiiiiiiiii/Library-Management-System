@@ -361,3 +361,189 @@ function notificationExistsToday(PDO $pdo, ?int $userId, ?string $studentId, ?st
 
     return (int)$stmt->fetchColumn() > 0;
 }
+
+function reservationStatusBadgeClass(string $status): string
+{
+    return match ($status) {
+        'pending' => 'bg-gray-100 text-gray-700',
+        'ready' => 'bg-blue-100 text-blue-700',
+        'borrowed' => 'bg-gray-200 text-gray-700',
+        'cancelled' => 'bg-red-100 text-red-700',
+        'expired' => 'bg-red-100 text-red-700',
+        default => 'bg-gray-100 text-gray-700',
+    };
+}
+
+function reservationStatusLabel(string $status): string
+{
+    return match ($status) {
+        'pending' => 'Pending',
+        'ready' => 'Ready to Pick Up',
+        'borrowed' => 'Borrowed',
+        'cancelled' => 'Cancelled',
+        'expired' => 'Expired',
+        default => ucfirst($status),
+    };
+}
+
+function promoteNextPendingReservation(PDO $pdo, int $bookId): bool
+{
+    $nextStmt = $pdo->prepare("
+        SELECT id, user_id, student_id, studentName
+        FROM reservations
+        WHERE book_id = ?
+          AND status = 'pending'
+        ORDER BY reservationDate ASC, id ASC
+        LIMIT 1
+    ");
+    $nextStmt->execute([$bookId]);
+    $nextReservation = $nextStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$nextReservation) {
+        return false;
+    }
+
+    $newExpiryDate = nextReservationExpiryDateTime(3);
+
+    $readyStmt = $pdo->prepare("
+        UPDATE reservations
+        SET status = 'ready',
+            expiryDate = ?
+        WHERE id = ?
+    ");
+    $readyStmt->execute([$newExpiryDate, $nextReservation['id']]);
+
+    $notifyUserId = !empty($nextReservation['user_id']) ? (int)$nextReservation['user_id'] : null;
+    $notifyStudentId = $nextReservation['student_id'] ?: null;
+    $notifyStudentName = $nextReservation['studentName'] ?: null;
+
+    if (!notificationExistsToday(
+        $pdo,
+        $notifyUserId,
+        $notifyStudentId,
+        $notifyStudentName,
+        'reservation_ready',
+        'Book Ready for Pickup'
+    )) {
+        createNotification(
+            $pdo,
+            $notifyUserId,
+            $notifyStudentId,
+            $notifyStudentName,
+            'reservation_ready',
+            'Book Ready for Pickup',
+            'Your reserved book is now available and ready for pickup.',
+            'reservations.php'
+        );
+    }
+
+    return true;
+}
+
+function releaseReservedBookCopy(PDO $pdo, int $bookId): void
+{
+    $bookUpdate = $pdo->prepare("
+        UPDATE books
+        SET availableCopies = availableCopies + 1
+        WHERE id = ?
+          AND availableCopies < totalCopies
+    ");
+    $bookUpdate->execute([$bookId]);
+}
+
+function expireReservationById(PDO $pdo, int $reservationId): void
+{
+    $stmt = $pdo->prepare("
+        SELECT id, book_id, status
+        FROM reservations
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$reservationId]);
+    $reservation = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$reservation) {
+        return;
+    }
+
+    if (!in_array($reservation['status'], ['pending', 'ready'], true)) {
+        return;
+    }
+
+    $updateExpired = $pdo->prepare("
+        UPDATE reservations
+        SET status = 'expired'
+        WHERE id = ?
+    ");
+    $updateExpired->execute([$reservationId]);
+
+    if ($reservation['status'] === 'ready') {
+        $promoted = promoteNextPendingReservation($pdo, (int)$reservation['book_id']);
+
+        if (!$promoted) {
+            releaseReservedBookCopy($pdo, (int)$reservation['book_id']);
+        }
+    }
+}
+
+function processExpiredReservations(PDO $pdo): void
+{
+    $expireStmt = $pdo->prepare("
+        SELECT id
+        FROM reservations
+        WHERE status IN ('pending', 'ready')
+          AND expiryDate IS NOT NULL
+          AND expiryDate < NOW()
+        ORDER BY expiryDate ASC, id ASC
+    ");
+    $expireStmt->execute();
+    $expiredReservations = $expireStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($expiredReservations as $row) {
+        $pdo->beginTransaction();
+
+        try {
+            expireReservationById($pdo, (int)$row['id']);
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+        }
+    }
+}
+
+function cancelReservationAndReassign(PDO $pdo, int $reservationId): bool
+{
+    $stmt = $pdo->prepare("
+        SELECT id, book_id, status
+        FROM reservations
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$reservationId]);
+    $reservation = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$reservation) {
+        return false;
+    }
+
+    if (!in_array($reservation['status'], ['pending', 'ready'], true)) {
+        return false;
+    }
+
+    $update = $pdo->prepare("
+        UPDATE reservations
+        SET status = 'cancelled'
+        WHERE id = ?
+    ");
+    $update->execute([$reservationId]);
+
+    if ($reservation['status'] === 'ready') {
+        $promoted = promoteNextPendingReservation($pdo, (int)$reservation['book_id']);
+
+        if (!$promoted) {
+            releaseReservedBookCopy($pdo, (int)$reservation['book_id']);
+        }
+    }
+
+    return true;
+}

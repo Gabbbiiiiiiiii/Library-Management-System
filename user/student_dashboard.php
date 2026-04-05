@@ -41,6 +41,74 @@ $pdo->exec("
       AND returnDate IS NULL
 ");
 
+/* ================= CREATE OVERDUE NOTIFICATIONS ================= */
+$stmt = $pdo->prepare("
+    SELECT
+        b.id,
+        b.dueDate,
+        bk.title
+    FROM borrowings b
+    LEFT JOIN books bk ON bk.id = b.book_id
+    WHERE (
+        b.user_id = :user_id
+        OR b.student_id = :student_id
+        OR b.studentName = :student_name
+    )
+    AND b.status = 'overdue'
+    AND b.returnDate IS NULL
+    ORDER BY b.dueDate ASC, b.id ASC
+");
+$stmt->execute([
+    ':user_id' => $userId,
+    ':student_id' => $studentId,
+    ':student_name' => $studentName
+]);
+
+$overdueRows = $stmt->fetchAll();
+
+foreach ($overdueRows as $row) {
+    $bookTitle = $row['title'] ?: 'Unknown Book';
+
+    $title = 'Book Overdue';
+    $message = 'Your borrowed book "' . $bookTitle . '" is overdue. Please return it as soon as possible to avoid additional penalties.';
+
+    // one notification per overdue book per day
+    $existsStmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM notifications
+        WHERE (
+            user_id = :user_id
+            OR student_id = :student_id
+            OR student_name = :student_name
+        )
+        AND type = :type
+        AND title = :title
+        AND message = :message
+        AND DATE(created_at) = CURDATE()
+    ");
+    $existsStmt->execute([
+        ':user_id' => $userId,
+        ':student_id' => $studentId,
+        ':student_name' => $studentName,
+        ':type' => 'overdue',
+        ':title' => $title,
+        ':message' => $message
+    ]);
+
+    if ((int)$existsStmt->fetchColumn() === 0) {
+        createNotification(
+            $pdo,
+            $userId,
+            $studentId,
+            $studentName,
+            'overdue',
+            $title,
+            $message,
+            'my_borrowings.php?tab=active'
+        );
+    }
+}
+
 /* ================= COUNTS ================= */
 $activeBorrowings = 0;
 $activeReservations = 0;

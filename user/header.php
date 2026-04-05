@@ -236,6 +236,14 @@ function renderNotifications(data) {
         const bg = isUnread ? 'bg-blue-50' : 'bg-white';
         const link = item.link ? item.link : 'student_dashboard.php';
 
+        let iconClass = 'text-blue-500';
+
+        if (item.type === 'reservation_ready') {
+            iconClass = 'text-green-500';
+        } else if (item.type === 'overdue') {
+            iconClass = 'text-red-500';
+        }
+
         return `
             <div id="notif-item-${Number(item.id)}"
                 class="notif-item group flex items-start justify-between gap-3 px-4 py-4 border-b last:border-b-0 hover:bg-gray-50 transition ${bg}">
@@ -245,9 +253,13 @@ function renderNotifications(data) {
                 class="flex-1 min-w-0"
                 onclick="markSingleNotificationRead(${Number(item.id)})">
 
-                    <p class="font-semibold text-slate-900 text-[15px] leading-6">
-                        ${escapeHtml(item.title)}
-                    </p>
+                    <!-- 🔥 ICON + TITLE -->
+                    <div class="flex items-center gap-2">
+                        <span class="${iconClass} text-xs font-bold">•</span>
+                        <p class="font-semibold text-slate-900 text-[15px] leading-6">
+                            ${escapeHtml(item.title)}
+                        </p>
+                    </div>
 
                     <p class="text-sm text-slate-600 mt-1 leading-6">
                         ${escapeHtml(item.message)}
@@ -261,12 +273,10 @@ function renderNotifications(data) {
                 <!-- RIGHT SIDE -->
                 <div class="flex items-center gap-2 shrink-0">
 
-                    <!-- UNREAD DOT -->
                     ${Number(item.is_read) === 0 ? `
                         <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
                     ` : ''}
 
-                    <!-- DELETE BUTTON (HOVER ONLY) -->
                     <button onclick="deleteNotification(${Number(item.id)})"
                         class="opacity-0 group-hover:opacity-100 transition duration-200 text-gray-400 hover:text-red-500 text-sm leading-none">
                         ✕

@@ -21,98 +21,13 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
-setLibraryDbTimezone($pdo);
-
+    setLibraryDbTimezone($pdo);
 } catch (PDOException $e) {
     die("Database connection failed.");
 }
 
-// /* ================= HELPERS ================= */
-// function e($value): string {
-//     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-// }
-
-// function formatDateText($date): string {
-//     if (empty($date) || $date === '0000-00-00') {
-//         return '—';
-//     }
-//     return date('M d, Y h:i A', strtotime($date));
-// }
-
-/* ================= AUTO EXPIRE ================= */
-/* Expire old pending/ready reservations properly */
-$expireStmt = $pdo->prepare("
-    SELECT id, book_id, user_id, student_id, studentName, status
-    FROM reservations
-    WHERE status IN ('pending', 'ready')
-      AND expiryDate IS NOT NULL
-      AND expiryDate < NOW()
-    ORDER BY expiryDate ASC, id ASC
-");
-$expireStmt->execute();
-$expiredReservations = $expireStmt->fetchAll();
-
-foreach ($expiredReservations as $expiredReservation) {
-    $pdo->beginTransaction();
-
-    try {
-        $updateExpired = $pdo->prepare("
-            UPDATE reservations
-            SET status = 'expired'
-            WHERE id = ?
-        ");
-        $updateExpired->execute([$expiredReservation['id']]);
-
-        /* Only ready reservations hold a copy */
-        if ($expiredReservation['status'] === 'ready') {
-            $nextStmt = $pdo->prepare("
-                SELECT id, user_id, student_id, studentName
-                FROM reservations
-                WHERE book_id = ?
-                  AND status = 'pending'
-                ORDER BY reservationDate ASC, id ASC
-                LIMIT 1
-            ");
-            $nextStmt->execute([$expiredReservation['book_id']]);
-            $nextReservation = $nextStmt->fetch();
-
-            if ($nextReservation) {
-                $newExpiryDate = nextReservationExpiryDateTime(3);
-
-                $readyStmt = $pdo->prepare("
-                    UPDATE reservations
-                    SET status = 'ready',
-                        expiryDate = ?
-                    WHERE id = ?
-                ");
-                $readyStmt->execute([$newExpiryDate, $nextReservation['id']]);
-
-                createNotification(
-                    $pdo,
-                    $nextReservation['user_id'] ?: null,
-                    $nextReservation['student_id'] ?: null,
-                    $nextReservation['studentName'] ?: null,
-                    'general',
-                    'Book Ready for Pickup',
-                    'Your reserved book is now available and ready for pickup.',
-                    'reservations.php'
-                );
-            } else {
-                $bookUpdate = $pdo->prepare("
-                    UPDATE books
-                    SET availableCopies = availableCopies + 1
-                    WHERE id = ?
-                      AND availableCopies < totalCopies
-                ");
-                $bookUpdate->execute([$expiredReservation['book_id']]);
-            }
-        }
-
-        $pdo->commit();
-    } catch (Exception $e) {
-        $pdo->rollBack();
-    }
-}
+/* ================= SHARED RESERVATION WORKFLOW ================= */
+processExpiredReservations($pdo);
 
 /* ================= HANDLE CANCEL ================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_id'])) {
@@ -127,75 +42,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_id'])) {
         die("❌ Invalid reservation.");
     }
 
-    $stmt = $pdo->prepare("
-        SELECT id, book_id, user_id, student_id, studentName, status
-        FROM reservations
-        WHERE id = ?
-        LIMIT 1
-    ");
-    $stmt->execute([$cancelId]);
-    $reservation = $stmt->fetch();
-
-    if (!$reservation) {
-        die("❌ Reservation not found.");
-    }
-
-    if (in_array($reservation['status'], ['cancelled', 'borrowed', 'expired'], true)) {
-        header("Location: manage_reservations.php?tab=" . urlencode($currentTab));
-        exit();
-    }
-
     $pdo->beginTransaction();
 
     try {
-        $update = $pdo->prepare("
-            UPDATE reservations
-            SET status = 'cancelled'
-            WHERE id = ?
-        ");
-        $update->execute([$cancelId]);
+        $ok = cancelReservationAndReassign($pdo, $cancelId);
 
-        if ($reservation['status'] === 'ready') {
-            $nextStmt = $pdo->prepare("
-                SELECT id, user_id, student_id, studentName
-                FROM reservations
-                WHERE book_id = ?
-                  AND status = 'pending'
-                ORDER BY reservationDate ASC, id ASC
-                LIMIT 1
-            ");
-            $nextStmt->execute([$reservation['book_id']]);
-            $nextReservation = $nextStmt->fetch();
-
-            if ($nextReservation) {
-                $newExpiryDate = nextReservationExpiryDateTime(3);
-
-                $readyStmt = $pdo->prepare("
-                    UPDATE reservations
-                    SET status = 'ready',
-                        expiryDate = ?
-                    WHERE id = ?
-                ");
-                $readyStmt->execute([$newExpiryDate, $nextReservation['id']]);
-
-                createNotification(
-                    $pdo,
-                    $nextReservation['user_id'] ?: null,
-                    $nextReservation['student_id'] ?: null,
-                    $nextReservation['studentName'] ?: null,
-                    'general',
-                    'Book Ready for Pickup',
-                    'Your reserved book is now available and ready for pickup.',
-                    'reservations.php'
-                );
-            } else {
-                $bookUpdate = $pdo->prepare("
-                    UPDATE books
-                    SET availableCopies = availableCopies + 1
-                    WHERE id = ?
-                ");
-                $bookUpdate->execute([$reservation['book_id']]);
-            }
+        if (!$ok) {
+            $pdo->rollBack();
+            header("Location: manage_reservations.php?tab=" . urlencode($currentTab));
+            exit();
         }
 
         $pdo->commit();
@@ -235,20 +90,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pickup_id'])) {
         die("❌ Reservation not found.");
     }
 
-    if ($reservation['status'] !== 'ready') {
+    if (($reservation['status'] ?? '') !== 'ready') {
         die("❌ Only ready reservations can be marked as borrowed.");
     }
 
-    // 🚫 NEW RULE: MUST RETURN CURRENT BOOK FIRST
     $stmt = $pdo->prepare("
         SELECT COUNT(*)
         FROM borrowings
         WHERE user_id = ?
-        AND status IN ('borrowed', 'overdue')
+          AND status IN ('borrowed', 'overdue')
     ");
     $stmt->execute([$reservation['user_id']]);
 
-    if ($stmt->fetchColumn() > 0) {
+    if ((int)$stmt->fetchColumn() > 0) {
         $_SESSION['reservation_error'] = 'Student must return current borrowed book before claiming reservation.';
         header("Location: manage_reservations.php?tab=ready");
         exit();
@@ -257,8 +111,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pickup_id'])) {
     $pdo->beginTransaction();
 
     try {
-        $borrowDate = date('Y-m-d H:i:s');
-        $dueDate = date('Y-m-d 08:59:59', strtotime($borrowDate . ' +1 day'));
+        $borrowDate = nowDateTime();
+        $dueDate = nextBorrowDueDateTime();
 
         $insertBorrowing = $pdo->prepare("
             INSERT INTO borrowings (
@@ -293,7 +147,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pickup_id'])) {
         $updateReservation->execute([$reservation['id']]);
 
         $pdo->commit();
-
         $_SESSION['reservation_success'] = 'Reserved book has been released to the student successfully.';
     } catch (Exception $e) {
         $pdo->rollBack();
@@ -400,30 +253,6 @@ $successMessage = $_SESSION['reservation_success'] ?? '';
 $errorMessage = $_SESSION['reservation_error'] ?? '';
 
 unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
-
-/* ================= DISPLAY HELPERS ================= */
-function getStudentName(array $row): string {
-    if (!empty($row['studentName'])) return $row['studentName'];
-    if (!empty($row['user_fullname'])) return $row['user_fullname'];
-    return 'Unknown Student';
-}
-
-function getStudentId(array $row): string {
-    if (!empty($row['student_id'])) return $row['student_id'];
-    if (!empty($row['user_student_id'])) return $row['user_student_id'];
-    return '—';
-}
-
-function getStatusBadgeClass(string $status): string {
-    return match ($status) {
-        'pending' => 'bg-gray-100 text-gray-700',
-        'ready' => 'bg-green-100 text-green-700',
-        'borrowed' => 'bg-blue-100 text-blue-700',
-        'cancelled' => 'bg-red-100 text-red-700',
-        'expired' => 'bg-red-100 text-red-700',
-        default => 'bg-gray-100 text-gray-700',
-    };
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -580,12 +409,14 @@ function getStatusBadgeClass(string $status): string {
 
             <?php foreach ($reservations as $row): ?>
                 <?php
-                    $studentName = getStudentName($row);
-                    $studentId = getStudentId($row);
+                    $studentName = getStudentDisplayName($row);
+                    $studentId = getStudentIdValue($row);
                     $cover = !empty($row['book_cover'])
-                    ? '/library-management-system/admin/' . ltrim($row['book_cover'], '/')
-                    : 'https://placehold.co/100x140?text=No+Cover';
-                    $isExpired = !empty($row['expiryDate']) && strtotime(date('Y-m-d H:i:s')) > strtotime($row['expiryDate']);
+                        ? '/library-management-system/admin/' . ltrim($row['book_cover'], '/')
+                        : 'https://placehold.co/100x140?text=No+Cover';
+                    $isExpired = !empty($row['expiryDate']) && strtotime($row['expiryDate']) < time();
+                    $timeLeft = !empty($row['expiryDate']) ? strtotime($row['expiryDate']) - time() : null;
+                    $isNearExpiry = $timeLeft !== null && $timeLeft > 0 && $timeLeft < 86400;
                 ?>
 
                 <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
@@ -610,8 +441,8 @@ function getStatusBadgeClass(string $status): string {
                                 </div>
 
                                 <div>
-                                    <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= getStatusBadgeClass((string)$row['status']) ?>">
-                                        <?= e(ucfirst((string)$row['status'])) ?>
+                                    <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= reservationStatusBadgeClass((string)$row['status']) ?>">
+                                        <?= e(reservationStatusLabel((string)$row['status'])) ?>
                                     </span>
                                 </div>
                             </div>
@@ -633,17 +464,27 @@ function getStatusBadgeClass(string $status): string {
                                 </div>
 
                                 <div>
-                                    <span class="text-gray-500">Expires:</span>
+                                    <span class="text-gray-500">Pickup Until:</span>
                                     <p class="font-medium <?= $isExpired ? 'text-red-600' : 'text-gray-900' ?>">
                                         <?= e(formatDateText($row['expiryDate'])) ?>
+                                    </p>
+
+                                    <?php if ($isNearExpiry): ?>
+                                        <p class="text-xs text-yellow-600 mt-1 font-semibold">
+                                            ⚠ Expires today!
+                                        </p>
+                                    <?php endif; ?>
+
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        Library closes at 5:00 PM
                                     </p>
                                 </div>
 
                                 <div>
                                     <span class="text-gray-500">Status:</span>
                                     <div class="mt-1">
-                                        <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= getStatusBadgeClass((string)$row['status']) ?>">
-                                            <?= e(ucfirst((string)$row['status'])) ?>
+                                        <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= reservationStatusBadgeClass((string)$row['status']) ?>">
+                                            <?= e(reservationStatusLabel((string)$row['status'])) ?>
                                         </span>
                                     </div>
                                 </div>
@@ -667,18 +508,27 @@ function getStatusBadgeClass(string $status): string {
                                         <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
                                         <input type="hidden" name="pickup_id" value="<?= e($row['id']) ?>">
                                         <button type="submit"
-                                                class="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">
+                                                class="bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700">
                                             Confirm Pickup
                                         </button>
                                     </form>
                                 <?php endif; ?>
                             </div>
-
                             <?php if ($row['status'] === 'ready'): ?>
                                 <div class="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800">
                                     <p class="font-medium">Book is ready for pickup!</p>
                                     <p class="mt-1 text-xs">
-                                        Pickup until <?= e(formatDateText($row['expiryDate'])) ?>.
+                                        Pickup Until <?= e(formatDateText($row['expiryDate'])) ?>
+                                    </p>
+
+                                    <?php if ($isNearExpiry): ?>
+                                        <p class="text-xs text-yellow-600 font-semibold">
+                                            ⚠ Expires today!
+                                        </p>
+                                    <?php endif; ?>
+
+                                    <p class="text-xs text-gray-500">
+                                        Library closes at 5:00 PM
                                     </p>
                                 </div>
                             <?php endif; ?>

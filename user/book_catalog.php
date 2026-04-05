@@ -237,6 +237,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit();
     }
 
+    $reservationDate = nowDateTime();
+    $expiryDate = nextReservationExpiryDateTime(3);
+
     $stmt = $pdo->prepare("
         INSERT INTO reservations (
             book_id,
@@ -253,8 +256,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $userId,
         $studentName,
         $studentId,
-        date('Y-m-d H:i:s'),
-        date('Y-m-d 17:00:00', strtotime('+3 days'))
+        $reservationDate,
+        $expiryDate
     ]);
 
 //     createNotification(
