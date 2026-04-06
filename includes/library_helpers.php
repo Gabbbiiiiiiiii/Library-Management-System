@@ -102,6 +102,8 @@ if (!defined('LIBRARY_HELPERS_LOADED')) {
         $time = $dt->format('H:i:s');
 
         return $time >= '07:00:00' && $time <= '17:00:00';
+
+        // return true; // open library 24/7 for testing
     }
 
     function libraryClosedMessage(): string

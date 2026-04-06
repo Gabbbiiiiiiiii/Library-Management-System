@@ -47,9 +47,57 @@ if (!$admin) {
 // =========================
 // FLASH MESSAGES
 // =========================
-$success = $_SESSION['success_message'] ?? '';
-$error = $_SESSION['error_message'] ?? '';
-unset($_SESSION['success_message'], $_SESSION['error_message']);
+$profile_success = $_SESSION['profile_success'] ?? '';
+$profile_error = $_SESSION['profile_error'] ?? '';
+
+$password_success = $_SESSION['password_success'] ?? '';
+$password_error = $_SESSION['password_error'] ?? '';
+
+unset($_SESSION['profile_success'], $_SESSION['profile_error']);
+unset($_SESSION['password_success'], $_SESSION['password_error']);
+
+// =========================
+// UPDATE PROFILE INFO (EMAIL)
+// =========================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
+    $fullname = trim($_POST['fullname'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+
+    if ($fullname === '' || $email === '') {
+        $_SESSION['profile_error'] = "Full name and email are required.";
+    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $_SESSION['profile_error'] = "Please enter a valid email address.";
+    } else {
+        $checkStmt = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1");
+        $checkStmt->bind_param("si", $email, $adminId);
+        $checkStmt->execute();
+        $checkResult = $checkStmt->get_result();
+        $emailExists = $checkResult->fetch_assoc();
+        $checkStmt->close();
+
+        if ($emailExists) {
+            $_SESSION['profile_error'] = "That email is already being used by another account.";
+        } else {
+            $updateStmt = $conn->prepare("
+                UPDATE users
+                SET fullname = ?, email = ?
+                WHERE id = ? AND role = 'admin'
+            ");
+            $updateStmt->bind_param("ssi", $fullname, $email, $adminId);
+
+            if ($updateStmt->execute()) {
+                $_SESSION['profile_success'] = "Profile updated successfully.";
+            } else {
+                $_SESSION['profile_error'] = "Failed to update profile.";
+            }
+
+            $updateStmt->close();
+        }
+    }
+
+    header("Location: profile.php");
+    exit();
+}
 
 // =========================
 // CHANGE PASSWORD (PRG)
@@ -60,15 +108,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
     $confirmPassword = trim($_POST['confirm_password'] ?? '');
 
     if ($currentPassword === '' || $newPassword === '' || $confirmPassword === '') {
-        $_SESSION['error_message'] = "All password fields are required.";
+        $_SESSION['password_error'] = "All password fields are required.";
     } elseif (!password_verify($currentPassword, $admin['password'])) {
-        $_SESSION['error_message'] = "Current password is incorrect.";
+        $_SESSION['password_error'] = "Current password is incorrect.";
     } elseif (strlen($newPassword) < 8) {
-        $_SESSION['error_message'] = "New password must be at least 8 characters long.";
+        $_SESSION['password_error'] = "New password must be at least 8 characters long.";
     } elseif ($newPassword !== $confirmPassword) {
-        $_SESSION['error_message'] = "New password and confirm password do not match.";
+        $_SESSION['password_error'] = "New password and confirm password do not match.";
     } elseif (password_verify($newPassword, $admin['password'])) {
-        $_SESSION['error_message'] = "New password must be different from the current password.";
+        $_SESSION['password_error'] = "New password must be different from the current password.";
     } else {
         $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
 
@@ -80,9 +128,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
         $updateStmt->bind_param("si", $hashedPassword, $adminId);
 
         if ($updateStmt->execute()) {
-            $_SESSION['success_message'] = "Password updated successfully.";
+            $_SESSION['password_success'] = "Password updated successfully.";
         } else {
-            $_SESSION['error_message'] = "Failed to update password.";
+            $_SESSION['password_error'] = "Failed to update password.";
         }
 
         $updateStmt->close();
@@ -97,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
 // =========================
 $profileImage = !empty($admin['profile_image'])
     ? "../" . ltrim($admin['profile_image'], "/")
-    : "../assets/images/default-avatar.png";
+    : "../assets/images/default-avatar.jpg";
 
 $coverImage = !empty($admin['cover_image'])
     ? "../" . ltrim($admin['cover_image'], "/")
@@ -199,60 +247,84 @@ $coverImage = !empty($admin['cover_image'])
             <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
                 <div class="mb-6">
                     <h2 class="text-2xl font-bold text-slate-900">Profile Information</h2>
-                    <p class="text-slate-500 mt-1">All fields below are read-only.</p>
+                    <p class="text-slate-500 mt-1">You can update your full name and email here.</p>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">Full Name</label>
-                        <input
-                            type="text"
-                            readonly
-                            value="<?= e($admin['fullname']) ?>"
-                            class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                        >
+                <?php if (!empty($profile_success)): ?>
+                    <div class="mb-4 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
+                        <?= e($profile_success) ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (!empty($profile_error)): ?>
+                    <div class="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+                        <?= e($profile_error) ?>
+                    </div>
+                <?php endif; ?>
+
+                <form method="POST" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-2">Full Name</label>
+                            <input
+                                type="text"
+                                name="fullname"
+                                value="<?= e($admin['fullname']) ?>"
+                                required
+                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            >
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-2">Email</label>
+                            <input
+                                type="email"
+                                name="email"
+                                value="<?= e($admin['email']) ?>"
+                                required
+                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            >
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-2">Role</label>
+                            <input
+                                type="text"
+                                readonly
+                                value="<?= e(ucfirst($admin['role'])) ?>"
+                                class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
+                            >
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-2">Created At</label>
+                            <input
+                                type="text"
+                                readonly
+                                value="<?= e(date('F d, Y h:i A', strtotime($admin['created_at']))) ?>"
+                                class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
+                            >
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-600 mb-2">Secret Key</label>
+                            <input
+                                type="text"
+                                readonly
+                                value="••••••••••••"
+                                class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
+                            >
+                        </div>
                     </div>
 
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">Email</label>
-                        <input
-                            type="text"
-                            readonly
-                            value="<?= e($admin['email']) ?>"
-                            class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                        >
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">Role</label>
-                        <input
-                            type="text"
-                            readonly
-                            value="<?= e(ucfirst($admin['role'])) ?>"
-                            class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                        >
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">Created At</label>
-                        <input
-                            type="text"
-                            readonly
-                            value="<?= e(date('F d, Y h:i A', strtotime($admin['created_at']))) ?>"
-                            class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                        >
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">Secret Key</label>
-                        <input
-                            type="text"
-                            readonly
-                            value="••••••••••••"
-                            class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                        >
-                    </div>
-                </div>
+                    <button
+                        type="submit"
+                        name="update_profile"
+                        class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-6 py-3 rounded-2xl transition"
+                    >
+                        Save Profile Changes
+                    </button>
+                </form>
             </section>
         </div>
 
@@ -264,15 +336,15 @@ $coverImage = !empty($admin['cover_image'])
                     <p class="text-slate-500 mt-1">Only password can be changed here.</p>
                 </div>
 
-                <?php if (!empty($success)): ?>
+                <?php if (!empty($password_success)): ?>
                     <div class="mb-4 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
-                        <?= e($success) ?>
+                        <?= e($password_success) ?>
                     </div>
                 <?php endif; ?>
 
-                <?php if (!empty($error)): ?>
+                <?php if (!empty($password_error)): ?>
                     <div class="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-                        <?= e($error) ?>
+                        <?= e($password_error) ?>
                     </div>
                 <?php endif; ?>
 
