@@ -1,13 +1,27 @@
 <?php
 session_start();
-$isbnError = $_SESSION['isbn_error'] ?? '';
 $openModalOnLoad = $_SESSION['open_modal'] ?? false;
 $modalMode = $_SESSION['modal_mode'] ?? 'Add';
 
-unset($_SESSION['isbn_error'], $_SESSION['open_modal'], $_SESSION['modal_mode']);
-
-unset($_SESSION['isbn_error'], $_SESSION['open_modal']);
+unset($_SESSION['open_modal'], $_SESSION['modal_mode']);
+require_once __DIR__ . '/../includes/library_helpers.php';
 require_once "auth_check.php";
+
+function redirectWithError(string $message): void
+{
+    $_SESSION['error_message'] = $message;
+    header("Location: manage_books.php");
+    exit();
+}
+
+function redirectWithModalError(string $message, string $mode = 'Add'): void
+{
+    $_SESSION['error_message'] = $message;
+    $_SESSION['open_modal'] = true;
+    $_SESSION['modal_mode'] = $mode;
+    header("Location: manage_books.php");
+    exit();
+}
 
 $currentPage = 'manage_books';
 
@@ -27,31 +41,52 @@ try {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]
     );
+    setLibraryDbTimezone($pdo);
 } catch (PDOException $e) {
-    die("Database connection failed.");
+    redirectWithError("❌ Database connection failed.");
 }
 
 /* ================= HANDLE DELETE ================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
 
     if (!hash_equals($_SESSION['token'], $_POST['token'] ?? '')) {
-        die("❌ Invalid CSRF token.");
+        redirectWithError("❌ Invalid CSRF token.");
     }
 
     $deleteId = (int) $_POST['delete_id'];
 
-    $checkBorrow = $pdo->prepare("
-        SELECT COUNT(*) FROM borrowings
-        WHERE book_id = ? AND status = 'borrowed'
+    // ✅ CHECK BORROWED OR OVERDUE
+    $checkActiveBorrowing = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM borrowings
+        WHERE book_id = ?
+          AND status IN ('borrowed', 'overdue')
     ");
-    $checkBorrow->execute([$deleteId]);
+    $checkActiveBorrowing->execute([$deleteId]);
 
-    if ($checkBorrow->fetchColumn() > 0) {
-        die("❌ Cannot delete book because it is currently borrowed.");
+    // ✅ CHECK ACTIVE RESERVATIONS
+    $checkActiveReservation = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM reservations
+        WHERE book_id = ?
+          AND status IN ('pending', 'ready')
+    ");
+    $checkActiveReservation->execute([$deleteId]);
+
+    if ((int)$checkActiveBorrowing->fetchColumn() > 0) {
+        redirectWithError("❌ Cannot delete book because it is currently borrowed or overdue.");
     }
 
-    $stmt = $pdo->prepare("DELETE FROM books WHERE id = ?");
-    $stmt->execute([$deleteId]);
+    if ((int)$checkActiveReservation->fetchColumn() > 0) {
+        redirectWithError("❌ Cannot delete book because it has active reservations.");
+    }
+
+    // ✅ SAFE TO DELETE
+    $delete = $pdo->prepare("DELETE FROM books WHERE id = ?");
+    $delete->execute([$deleteId]);
+
+    // ✅ SUCCESS MESSAGE
+    $_SESSION['success_message'] = "✅ Book deleted successfully.";
 
     header("Location: manage_books.php");
     exit();
@@ -61,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_id'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['delete_id'])) {
 
     if (!hash_equals($_SESSION['token'], $_POST['token'] ?? '')) {
-        die("❌ Invalid CSRF token.");
+        redirectWithError("❌ Invalid CSRF token.");
     }
 
     /* ===== GET DATA SAFELY ===== */
@@ -80,14 +115,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['delete_id'])) {
 
     /* ===== REQUIRED VALIDATION ===== */
     if ($title === '' || $author === '' || $isbn === '') {
-        die("❌ Title, author, and ISBN are required.");
+        redirectWithModalError("❌ Title, author, and ISBN are required.", $id ? 'Edit' : 'Add');
     }
 
     /* ===== ISBN CLEAN + VALIDATE ===== */
     $isbn = str_replace(['-', ' '], '', $isbn);
 
     if (!preg_match('/^(97[89]\d{10}|\d{9}[\dX])$/', $isbn)) {
-        die("❌ Invalid ISBN.");
+        redirectWithModalError("❌ Invalid ISBN.", $id ? 'Edit' : 'Add');
     }
 
   /* ===== DUPLICATE ISBN ===== */
@@ -96,43 +131,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['delete_id'])) {
     $existing = $check->fetch();
 
     if ($existing && (string)$existing['id'] !== (string)$id) {
-        $_SESSION['isbn_error'] = "❌ ISBN already exists.";
-        $_SESSION['open_modal'] = true;
-        $_SESSION['modal_mode'] = $id ? 'Edit' : 'Add';
-        header("Location: manage_books.php");
-        exit();
+        redirectWithModalError("❌ ISBN already exists.", $id ? 'Edit' : 'Add');
     }
 
     /* ===== YEAR VALIDATION ===== */
     $currentYear = date("Y");
     if ($year < 1800 || $year > $currentYear) {
-        die("❌ Invalid publication year.");
+        redirectWithModalError("❌ Invalid publication year.", $id ? 'Edit' : 'Add');
     }
 
     /* ===== COPIES VALIDATION ===== */
     if ($total < 1) {
-        die("❌ Total copies must be at least 1.");
+        redirectWithModalError("❌ Total copies must be at least 1.", $id ? 'Edit' : 'Add');
     }
 
     if ($available < 0 || $available > $total) {
-        die("❌ Invalid available copies.");
+        redirectWithModalError("❌ Invalid available copies.", $id ? 'Edit' : 'Add');
     }
 
     /* ===== BORROW CHECK (EDIT ONLY) ===== */
     if ($id) {
         $stmt = $pdo->prepare("
-            SELECT COUNT(*) FROM borrowings
-            WHERE book_id = ? AND status = 'borrowed'
+            SELECT COUNT(*)
+            FROM borrowings
+            WHERE book_id = ?
+            AND status IN ('borrowed', 'overdue')
         ");
         $stmt->execute([$id]);
         $borrowed = (int) $stmt->fetchColumn();
 
         if ($total < $borrowed) {
-            die("❌ Total copies cannot be less than borrowed.");
+            redirectWithModalError("❌ Total copies cannot be less than borrowed.", 'Edit');
         }
 
         if ($available > ($total - $borrowed)) {
-            die("❌ Available copies exceed allowed.");
+            redirectWithModalError("❌ Available copies exceed allowed.", 'Edit');
         }
     }
 
@@ -142,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['delete_id'])) {
         $file = $_FILES['coverFile'];
 
         if ($file['error'] !== UPLOAD_ERR_OK) {
-            die("❌ Upload error.");
+            redirectWithModalError("❌ Upload error.", $id ? 'Edit' : 'Add');
         }
 
         $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -151,11 +184,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['delete_id'])) {
         $mime = $finfo->file($file['tmp_name']);
 
         if (!in_array($mime, $allowedTypes)) {
-            die("❌ Invalid image type.");
+            redirectWithModalError("❌ Invalid image type.", $id ? 'Edit' : 'Add');
         }
 
         if ($file['size'] > 2 * 1024 * 1024) {
-            die("❌ Image must be under 2MB.");
+            redirectWithModalError("❌ Image must be under 2MB.", $id ? 'Edit' : 'Add');
         }
 
         if (!is_dir('uploads')) {
@@ -165,8 +198,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['delete_id'])) {
         $filename = uniqid() . '_' . preg_replace("/[^a-zA-Z0-9._-]/", "", $file['name']);
         $target = "uploads/" . $filename;
 
-        if (!move_uploaded_file($file['tmp_name'], $target)) {
-            die("❌ Upload failed.");
+       if (!move_uploaded_file($file['tmp_name'], $target)) {
+            redirectWithModalError("❌ Upload failed.", $id ? 'Edit' : 'Add');
         }
 
         $cover = $target;
@@ -207,6 +240,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['delete_id'])) {
             $description, $cover
         ]);
     }
+
+        $_SESSION['success_message'] = $id
+        ? "✅ Book updated successfully."
+        : "✅ Book added successfully.";
 
     header("Location: manage_books.php");
     exit();
@@ -280,7 +317,20 @@ $books = $stmt->fetchAll();
 <?php include 'header.php'; ?>
 
 <div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
+
+<?php if (!empty($_SESSION['success_message'])): ?>
+    <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
+        <?= e($_SESSION['success_message']) ?>
+    </div>
+    <?php unset($_SESSION['success_message']); ?>
+<?php endif; ?>
     
+<?php if (!empty($_SESSION['error_message'])): ?>
+    <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+        <?= e($_SESSION['error_message']) ?>
+    </div>
+    <?php unset($_SESSION['error_message']); ?>
+<?php endif; ?>
 
 <!-- TITLE + ADD BUTTON -->
 <div class="flex justify-between items-center mb-6">
@@ -299,7 +349,7 @@ $books = $stmt->fetchAll();
 <!-- SEARCH -->
 <form method="GET" class="mb-6 flex gap-2">
     <input type="text" name="search"
-           value="<?= htmlspecialchars($search, ENT_QUOTES, 'UTF-8') ?>"
+           value="<?= e($search) ?>"
            placeholder="Search by title, author, or ISBN..."
            class="w-full p-3 rounded-lg border focus:ring-2 focus:ring-purple-500">
 
@@ -314,14 +364,20 @@ $books = $stmt->fetchAll();
 <?php if (empty($books)): ?>
     <div class="bg-white p-6 rounded-xl shadow text-center">
         <p class="text-gray-500 text-lg">
-            📚 No books found<?= $search !== '' ? ' for "' . htmlspecialchars($search, ENT_QUOTES, 'UTF-8') . '"' : '' ?>.
+            <span class="text-gray-700 text-xl">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                    stroke-width="1.5" stroke="currentColor" class="inline w-5 h-5">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                </svg>
+            </span> No books found<?= $search !== '' ? ' for "' . e($search) . '"' : '' ?>.
         </p>
     </div>
 <?php else: ?>
     <?php foreach ($books as $book): ?>
         <div class="bg-white p-4 rounded-xl shadow flex gap-4">
 
-            <img src="<?= htmlspecialchars($book['coverImage'] ?: 'https://placehold.co/100x150?text=No+Cover', ENT_QUOTES, 'UTF-8') ?>"
+            <img src="<?= e($book['coverImage'] ?: 'https://placehold.co/100x150?text=No+Cover') ?>"
                  class="w-20 h-28 object-cover rounded"
                  alt="Book Cover">
 
@@ -329,8 +385,8 @@ $books = $stmt->fetchAll();
 
                 <div class="flex justify-between">
                     <div>
-                        <h3 class="font-semibold text-lg"><?= htmlspecialchars($book['title'], ENT_QUOTES, 'UTF-8') ?></h3>
-                        <p class="text-gray-600"><?= htmlspecialchars($book['author'], ENT_QUOTES, 'UTF-8') ?></p>
+                        <h3 class="font-semibold text-lg"><?= e($book['title']) ?></h3>
+                        <p class="text-gray-600"><?= e($book['author']) ?></p>
                     </div>
 
                     <span class="px-3 py-1 rounded-full text-xs font-medium <?= $book['availableCopies'] > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600' ?>">
@@ -339,17 +395,17 @@ $books = $stmt->fetchAll();
                 </div>
 
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3">
-                    <div><strong>ISBN:</strong> <?= htmlspecialchars($book['isbn'], ENT_QUOTES, 'UTF-8') ?></div>
-                    <div><strong>Category:</strong> <?= htmlspecialchars($book['category'], ENT_QUOTES, 'UTF-8') ?></div>
-                    <div><strong>Publisher:</strong> <?= htmlspecialchars($book['publisher'], ENT_QUOTES, 'UTF-8') ?></div>
-                    <div><strong>Year:</strong> <?= htmlspecialchars($book['yearPublished'], ENT_QUOTES, 'UTF-8') ?></div>
-                    <div><strong>Total:</strong> <?= htmlspecialchars($book['totalCopies'], ENT_QUOTES, 'UTF-8') ?></div>
+                    <div><strong>ISBN:</strong> <?= e($book['isbn']) ?></div>
+                    <div><strong>Category:</strong> <?= e($book['category']) ?></div>
+                    <div><strong>Publisher:</strong> <?= e($book['publisher']) ?></div>
+                    <div><strong>Year:</strong> <?= e($book['yearPublished']) ?></div>
+                    <div><strong>Total:</strong> <?= e($book['totalCopies']) ?></div>
                     <div><strong>Available:</strong>
-                        <span class="text-green-600"><?= htmlspecialchars($book['availableCopies'], ENT_QUOTES, 'UTF-8') ?></span>
+                        <span class="text-green-600"><?= e($book['availableCopies']) ?></span>
                     </div>
                     <div><strong>Borrowed:</strong>
                         <span class="text-blue-600">
-                            <?= htmlspecialchars((string)($book['totalCopies'] - $book['availableCopies']), ENT_QUOTES, 'UTF-8') ?>
+                            <?= e((string)($book['totalCopies'] - $book['availableCopies'])) ?>
                         </span>
                     </div>
                 </div>
@@ -361,8 +417,8 @@ $books = $stmt->fetchAll();
                     </button>
 
                     <form method="POST" onsubmit="return confirm('Delete this book?')" class="inline">
-                        <input type="hidden" name="token" value="<?= htmlspecialchars($_SESSION['token'], ENT_QUOTES, 'UTF-8') ?>">
-                        <input type="hidden" name="delete_id" value="<?= htmlspecialchars($book['id'], ENT_QUOTES, 'UTF-8') ?>">
+                        <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
+                        <input type="hidden" name="delete_id" value="<?= e($book['id']) ?>">
 
                         <button type="submit"
                                 class="border px-3 py-1 rounded hover:bg-red-100 text-red-600">
@@ -428,7 +484,7 @@ class="px-3 py-1 border rounded
 
                 <!-- FORM -->
                 <form id="bookForm" method="POST" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="hidden" name="token" value="<?= $_SESSION['token'] ?>">
+                    <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
                     <input type="hidden" name="id" id="bookId">
 
                     <!-- TITLE -->
@@ -581,19 +637,13 @@ if (searchInput) {
         clearTimeout(timeout);
 
         timeout = setTimeout(() => {
-            const params = new URLSearchParams(window.location.search);
-            const currentCategory = params.get('category') || 'all';
-
             if (this.value.trim() === '') {
-                // Reset search but keep category
-                window.location.href = 'manage_books.php?category=' + encodeURIComponent(currentCategory);
+                window.location.href = 'manage_books.php';
             } else {
-                // Live search
                 window.location.href =
-                    'manage_books.php?search=' + encodeURIComponent(this.value) +
-                    '&category=' + encodeURIComponent(currentCategory);
+                    'manage_books.php?search=' + encodeURIComponent(this.value);
             }
-        }, 500); // adjust delay if needed
+        }, 500);
     });
 }
 
@@ -725,9 +775,8 @@ function previewImage(event) {
 }
 
 // --- OPEN MODAL ON ISBN ERROR ---
-<?php if (!empty($isbnError) && $openModalOnLoad): ?>
+<?php if ($openModalOnLoad): ?>
 window.addEventListener('DOMContentLoaded', function () {
-    alert(<?= json_encode($isbnError) ?>);
     openModal(<?= json_encode($modalMode) ?>);
 });
 <?php endif; ?>

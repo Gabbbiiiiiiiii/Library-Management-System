@@ -46,6 +46,13 @@ $userId = $_SESSION['user_id'] ?? null;
 $studentName = $_SESSION['fullname'] ?? 'Student';
 $studentId = $_SESSION['student_id'] ?? '';
 
+function redirectCatalogWithMessage(string $message, string $type = 'error_message'): void
+{
+    $_SESSION[$type] = $message;
+    header("Location: book_catalog.php");
+    exit();
+}
+
 // /* ================= HELPERS ================= */
 // function e($value): string {
 //     return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
@@ -69,6 +76,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     if (!hash_equals($_SESSION['token'], $_POST['token'] ?? '')) {
         die("❌ Invalid CSRF token.");
+    }
+
+    if (!isLibraryOpen()) {
+        redirectCatalogWithMessage(libraryClosedMessage());
     }
 
     $bookId = (int)($_POST['book_id'] ?? 0);
@@ -147,13 +158,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 penalty
             ) VALUES (?, ?, ?, ?, ?, ?, NULL, 'borrowed', 0.00)
         ");
+        $borrowDate = nowDateTime();
+        $dueDate = nextBorrowDueDateTime($borrowDate);
+
         $insertBorrowing->execute([
             $bookId,
             $userId,
             $studentName,
             $studentId,
-            date('Y-m-d H:i:s'),
-            date('Y-m-d 08:59:59', strtotime('+1 day'))
+            $borrowDate,
+            $dueDate
         ]);
 
         $updateBook = $pdo->prepare("
@@ -181,6 +195,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
     if (!hash_equals($_SESSION['token'], $_POST['token'] ?? '')) {
         die("❌ Invalid CSRF token.");
+    }
+
+    if (!isLibraryOpen()) {
+    redirectCatalogWithMessage(libraryClosedMessage());
     }
 
     $bookId = (int)($_POST['book_id'] ?? 0);
@@ -238,7 +256,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 
     $reservationDate = nowDateTime();
-    $expiryDate = nextReservationExpiryDateTime(3);
+    $expiryDate = nextReservationExpiryDateTime(3, $reservationDate);
 
     $stmt = $pdo->prepare("
         INSERT INTO reservations (
@@ -366,10 +384,21 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
         </button>
     </form>
 
+    <?php
+    $libraryOpenNow = isLibraryOpen();
+    $libraryClosedText = libraryClosedMessage();
+    ?>
+
     <!-- BOOK GRID -->
     <?php if (empty($books)): ?>
         <div class="bg-white rounded-2xl border border-gray-200 p-10 text-center shadow-sm">
-            <div class="text-5xl mb-4">📚</div>
+                <span class="text-gray-700 text-xl mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                        stroke-width="1.5" stroke="currentColor" class="inline w-9 h-9">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                    </svg>
+                </span>
             <p class="text-slate-500 text-lg">No books found matching your search.</p>
         </div>
     <?php else: ?>
@@ -430,15 +459,17 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                             <p>Copies: <?= e($book['availableCopies']) ?>/<?= e($book['totalCopies']) ?></p>
                         </div>
 
-                        <button
+                       <button
                             type="button"
                             onclick="openBookModal('<?= e($modalId) ?>')"
                             class="mt-5 w-full rounded-xl px-4 py-3 font-semibold text-white
-                            <?= $isAvailable 
-                                ? 'bg-blue-950 hover:bg-blue-900' 
-                                : 'bg-orange-500 hover:bg-orange-600' ?>"
+                            <?= !$libraryOpenNow
+                                ? 'bg-gray-400 cursor-not-allowed'
+                                : ($isAvailable ? 'bg-blue-950 hover:bg-blue-900' : 'bg-orange-500 hover:bg-orange-600') ?>"
+                            <?= !$libraryOpenNow ? 'disabled' : '' ?>
+                            title="<?= !$libraryOpenNow ? e($libraryClosedText) : '' ?>"
                         >
-                            <?= $isAvailable ? 'Borrow' : 'Reserve' ?>
+                            <?= !$libraryOpenNow ? 'Library Closed' : ($isAvailable ? 'Borrow' : 'Reserve') ?>
                         </button>
                     </div>
                 </div>
@@ -484,7 +515,7 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                                         <p class="font-semibold text-blue-900">Borrowing Terms:</p>
                                         <ul class="list-disc list-inside mt-2 text-blue-800 space-y-1">
                                             <li>Borrowing period: 1 day</li>
-                                            <li>Return by: <?= e(date('m/d/Y 08:59 AM', strtotime('+1 day'))) ?></li>
+                                            <li>Return by: Next day at 08:59 AM</li>
                                             <li>Late fee: ₱2 per hour after 8:59 AM until 5:00 PM only</li>
                                             <li>Starting the next day: ₱10 per day</li>
                                         </ul>
@@ -501,6 +532,7 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                                     Cancel
                                 </button>
 
+                                <?php if ($libraryOpenNow): ?>
                                 <form method="POST">
                                     <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
                                     <input type="hidden" name="book_id" value="<?= e($book['id']) ?>">
@@ -513,6 +545,16 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
                                         Confirm
                                     </button>
                                 </form>
+                            <?php else: ?>
+                                <button
+                                    type="button"
+                                    disabled
+                                    class="rounded-lg bg-gray-300 px-4 py-2 text-gray-600 cursor-not-allowed"
+                                    title="<?= e($libraryClosedText) ?>"
+                                >
+                                    Library Closed
+                                </button>
+                            <?php endif; ?>
                             </div>
                         </div>
                     </div>

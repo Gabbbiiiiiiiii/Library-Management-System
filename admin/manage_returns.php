@@ -108,6 +108,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
         die("❌ Invalid CSRF token.");
     }
 
+    if (!isLibraryOpen()) {
+    $_SESSION['error_message'] = libraryClosedMessage();
+    header("Location: manage_returns.php");
+    exit();
+    }
+
     $returnId = (int) $_POST['return_id'];
 
     $stmt = $pdo->prepare("
@@ -144,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
     $course      = $borrowing['course'] ?: ($borrowing['user_course'] ?: null);
     $yearlvl     = $borrowing['yearlvl'] ?: ($borrowing['user_yearlvl'] ?: null);
 
-    $returnDateTime = date('Y-m-d H:i:s');
+    $returnDateTime = nowDateTime();
 
     $penaltyInfo = calculatePenaltyAdvanced($borrowing['dueDate'], $returnDateTime);
     $penalty = $penaltyInfo['penalty'];
@@ -221,13 +227,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
 
         /* 5. If there is a pending reservation, make it READY */
         if ($nextReservation) {
+            $readyExpiry = readyReservationExpiryDateTime(3, $returnDateTime);
+
             $markReady = $pdo->prepare("
                 UPDATE reservations
                 SET status = 'ready',
-                    expiryDate = DATE_ADD(NOW(), INTERVAL 3 DAY)
+                    expiryDate = ?
                 WHERE id = ?
             ");
-            $markReady->execute([$nextReservation['id']]);
+            $markReady->execute([$readyExpiry, $nextReservation['id']]);
 
             $getReservationStudent = $pdo->prepare("
                 SELECT user_id, student_id, studentName, book_id
@@ -252,9 +260,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
                 $reservationStudent['user_id'] ? (int)$reservationStudent['user_id'] : null,
                 $reservationStudent['student_id'] ?? null,
                 $reservationStudent['studentName'] ?? null,
-                'ready_pickup',
+                'reservation_ready',
                 'Book Ready for Pickup',
-                'Your reserved book "' . ($bookInfo['title'] ?? 'Unknown Book') . '" is now ready for pickup.',
+                'Your reserved book "' . ($bookInfo['title'] ?? 'Unknown Book') . '" is now ready for pickup until 5:00 PM.',
                 'reservations.php'
             );
 
@@ -376,6 +384,13 @@ unset($_SESSION['success_message']);
         </div>
     <?php endif; ?>
 
+    <?php if (!empty($_SESSION['error_message'])): ?>
+    <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+        <?= e($_SESSION['error_message']) ?>
+    </div>
+    <?php unset($_SESSION['error_message']); ?>
+<?php endif; ?>
+
     <!-- SEARCH -->
     <form method="GET" class="mb-8">
         <div class="relative">
@@ -402,7 +417,9 @@ unset($_SESSION['success_message']);
                 <?php
                     $studentName = $row['studentName'] ?: ($row['user_fullname'] ?: 'Unknown Student');
                     $studentId   = $row['student_id'] ?: ($row['user_student_id'] ?: '—');
-                    $cover       = !empty($row['book_cover']) ? $row['book_cover'] : 'https://placehold.co/80x112?text=No+Cover';
+                    $cover = !empty($row['book_cover'])
+                    ? '/library-management-system/admin/' . ltrim($row['book_cover'], '/')
+                    : 'https://placehold.co/80x112?text=No+Cover';
                     $currentPenaltyInfo = calculatePenaltyAdvanced($row['dueDate'], date('Y-m-d H:i:s'));
                     $isOverdue = strtotime(date('Y-m-d H:i:s')) > strtotime($row['dueDate']);
                     $penalty = $currentPenaltyInfo['penalty'];
@@ -518,7 +535,7 @@ unset($_SESSION['success_message']);
                                     </div>
                                     <div class="flex justify-between text-sm">
                                         <span class="text-gray-600">Return Date:</span>
-                                        <span class="font-medium"><?= e(date('M d, Y')) ?></span>
+                                        <span class="font-medium"><?= e(formatDateText(nowDateTime())) ?></span>
                                     </div>
                                 </div>
 

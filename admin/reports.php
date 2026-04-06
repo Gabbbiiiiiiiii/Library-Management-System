@@ -38,42 +38,42 @@ $endDate   = trim($_GET['end_date'] ?? '');
 
 $borrowWhere = "";
 $returnWhere = "";
-$reservationWhere = "";
+$reservationCreatedWhere = "";
 
 $borrowParams = [];
 $returnParams = [];
-$reservationParams = [];
+$reservationCreatedParams = [];
 
 switch ($filter) {
     case 'today':
         $borrowWhere = "WHERE DATE(borrowDate) = CURDATE()";
         $returnWhere = "WHERE DATE(return_date) = CURDATE()";
-        $reservationWhere = "WHERE DATE(reservationDate) = CURDATE()";
+        $reservationCreatedWhere = "WHERE DATE(reservationDate) = CURDATE()";
         break;
 
     case 'this_week':
         $borrowWhere = "WHERE YEARWEEK(borrowDate, 1) = YEARWEEK(CURDATE(), 1)";
         $returnWhere = "WHERE YEARWEEK(return_date, 1) = YEARWEEK(CURDATE(), 1)";
-        $reservationWhere = "WHERE YEARWEEK(reservationDate, 1) = YEARWEEK(CURDATE(), 1)";
+        $reservationCreatedWhere = "WHERE YEARWEEK(reservationDate, 1) = YEARWEEK(CURDATE(), 1)";
         break;
 
     case 'this_month':
         $borrowWhere = "WHERE MONTH(borrowDate) = MONTH(CURDATE()) AND YEAR(borrowDate) = YEAR(CURDATE())";
         $returnWhere = "WHERE MONTH(return_date) = MONTH(CURDATE()) AND YEAR(return_date) = YEAR(CURDATE())";
-        $reservationWhere = "WHERE MONTH(reservationDate) = MONTH(CURDATE()) AND YEAR(reservationDate) = YEAR(CURDATE())";
+        $reservationCreatedWhere = "WHERE MONTH(reservationDate) = MONTH(CURDATE()) AND YEAR(reservationDate) = YEAR(CURDATE())";
         break;
 
     case 'this_year':
         $borrowWhere = "WHERE YEAR(borrowDate) = YEAR(CURDATE())";
         $returnWhere = "WHERE YEAR(return_date) = YEAR(CURDATE())";
-        $reservationWhere = "WHERE YEAR(reservationDate) = YEAR(CURDATE())";
+        $reservationCreatedWhere = "WHERE YEAR(reservationDate) = YEAR(CURDATE())";
         break;
 
     case 'custom':
         if ($startDate !== '' && $endDate !== '') {
             $borrowWhere = "WHERE DATE(borrowDate) BETWEEN :start_date AND :end_date";
             $returnWhere = "WHERE DATE(return_date) BETWEEN :start_date AND :end_date";
-            $reservationWhere = "WHERE DATE(reservationDate) BETWEEN :start_date AND :end_date";
+            $reservationCreatedWhere = "WHERE DATE(reservationDate) BETWEEN :start_date AND :end_date";
 
             $borrowParams = [
                 ':start_date' => $startDate,
@@ -83,7 +83,7 @@ switch ($filter) {
                 ':start_date' => $startDate,
                 ':end_date' => $endDate
             ];
-            $reservationParams = [
+            $reservationCreatedParams = [
                 ':start_date' => $startDate,
                 ':end_date' => $endDate
             ];
@@ -91,7 +91,7 @@ switch ($filter) {
             $filter = 'this_month';
             $borrowWhere = "WHERE MONTH(borrowDate) = MONTH(CURDATE()) AND YEAR(borrowDate) = YEAR(CURDATE())";
             $returnWhere = "WHERE MONTH(return_date) = MONTH(CURDATE()) AND YEAR(return_date) = YEAR(CURDATE())";
-            $reservationWhere = "WHERE MONTH(reservationDate) = MONTH(CURDATE()) AND YEAR(reservationDate) = YEAR(CURDATE())";
+            $reservationCreatedWhere = "WHERE MONTH(reservationDate) = MONTH(CURDATE()) AND YEAR(reservationDate) = YEAR(CURDATE())";
         }
         break;
 
@@ -99,7 +99,7 @@ switch ($filter) {
         $filter = 'this_month';
         $borrowWhere = "WHERE MONTH(borrowDate) = MONTH(CURDATE()) AND YEAR(borrowDate) = YEAR(CURDATE())";
         $returnWhere = "WHERE MONTH(return_date) = MONTH(CURDATE()) AND YEAR(return_date) = YEAR(CURDATE())";
-        $reservationWhere = "WHERE MONTH(reservationDate) = MONTH(CURDATE()) AND YEAR(reservationDate) = YEAR(CURDATE())";
+        $reservationCreatedWhere = "WHERE MONTH(reservationDate) = MONTH(CURDATE()) AND YEAR(reservationDate) = YEAR(CURDATE())";
         break;
 }
 
@@ -133,10 +133,10 @@ $stmt = $pdo->prepare("SELECT COUNT(*) FROM returns $returnWhere");
 $stmt->execute($returnParams);
 $totalReturns = (int)$stmt->fetchColumn();
 
-/* Filtered reservations */
-$stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations $reservationWhere");
-$stmt->execute($reservationParams);
-$totalReservations = (int)$stmt->fetchColumn();
+/* Reservations created in selected period */
+$stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations $reservationCreatedWhere");
+$stmt->execute($reservationCreatedParams);
+$totalReservationsCreated = (int)$stmt->fetchColumn();
 
 /* Current active borrowings - overall current status */
 $stmt = $pdo->query("SELECT COUNT(*) FROM borrowings WHERE status = 'borrowed'");
@@ -230,10 +230,10 @@ $stmt = $pdo->prepare("
         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
         SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired_count
     FROM reservations
-    $reservationWhere
+    $reservationCreatedWhere
 ");
-$stmt->execute($reservationParams);
-$reservationSummary = $stmt->fetch() ?: [
+$stmt->execute($reservationCreatedParams);
+$reservationCreatedSummary = $stmt->fetch() ?: [
     'pending_count' => 0,
     'ready_count' => 0,
     'borrowed_count' => 0,
@@ -364,8 +364,8 @@ $reservationSummary = $stmt->fetch() ?: [
         </div>
 
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Reservations (Selected Period)</p>
-            <h2 class="text-3xl font-bold text-orange-600 mt-4"><?= e($totalReservations) ?></h2>
+            <p class="text-sm font-medium text-gray-500">Reservations Created (Selected Period)</p>
+            <h2 class="text-3xl font-bold text-orange-600 mt-4"><?= e($totalReservationsCreated) ?></h2>
         </div>
 
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
@@ -384,11 +384,6 @@ $reservationSummary = $stmt->fetch() ?: [
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
             <p class="text-sm font-medium text-gray-500">Penalty Collected (Selected Period)</p>
             <h2 class="text-3xl font-bold text-yellow-600 mt-4">₱<?= number_format($totalPenaltyCollected, 2) ?></h2>
-        </div>
-
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Ready Reservations (Selected Period)</p>
-            <h2 class="text-3xl font-bold text-green-600 mt-4"><?= e((int)($reservationSummary['ready_count'] ?? 0)) ?></h2>
         </div>
     </div>
 
@@ -516,37 +511,35 @@ $reservationSummary = $stmt->fetch() ?: [
         </div>
 
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <h2 class="text-xl font-semibold text-gray-900 mb-5">Reservation Summary</h2>
-
+            <h2 class="text-xl font-semibold text-gray-900 mb-5">Reservations Created in Selected Period</h2>
+        
             <div class="space-y-4">
                 <div class="flex justify-between">
                     <span class="text-gray-600">Pending</span>
-                    <span class="font-semibold text-yellow-600"><?= e((int)($reservationSummary['pending_count'] ?? 0)) ?></span>
+                    <span class="font-semibold text-yellow-600"><?= e((int)($reservationCreatedSummary['pending_count'] ?? 0)) ?></span>
                 </div>
 
                 <div class="flex justify-between">
                     <span class="text-gray-600">Ready</span>
-                    <span class="font-semibold text-green-600"><?= e((int)($reservationSummary['ready_count'] ?? 0)) ?></span>
+                    <span class="font-semibold text-green-600"><?= e((int)($reservationCreatedSummary['ready_count'] ?? 0)) ?></span>
                 </div>
 
                 <div class="flex justify-between">
                     <span class="text-gray-600">Borrowed</span>
-                    <span class="font-semibold text-blue-600"><?= e((int)($reservationSummary['borrowed_count'] ?? 0)) ?></span>
+                    <span class="font-semibold text-blue-600"><?= e((int)($reservationCreatedSummary['borrowed_count'] ?? 0)) ?></span>
                 </div>
 
                 <div class="flex justify-between">
                     <span class="text-gray-600">Cancelled</span>
-                    <span class="font-semibold text-red-600"><?= e((int)($reservationSummary['cancelled_count'] ?? 0)) ?></span>
+                    <span class="font-semibold text-red-600"><?= e((int)($reservationCreatedSummary['cancelled_count'] ?? 0)) ?></span>
                 </div>
 
                 <div class="flex justify-between">
                     <span class="text-gray-600">Expired</span>
-                    <span class="font-semibold text-gray-700"><?= e((int)($reservationSummary['expired_count'] ?? 0)) ?></span>
+                    <span class="font-semibold text-gray-700"><?= e((int)($reservationCreatedSummary['expired_count'] ?? 0)) ?></span>
                 </div>
             </div>
         </div>
-    </div>
-
 </div>
 </body>
 </html>

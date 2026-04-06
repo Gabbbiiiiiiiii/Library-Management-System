@@ -5,15 +5,6 @@ declare(strict_types=1);
 |--------------------------------------------------------------------------
 | Library Shared Helpers
 |--------------------------------------------------------------------------
-| Reusable helpers for:
-| - timezone
-| - escaping
-| - date formatting
-| - relative time
-| - overdue checks
-| - penalty calculation
-| - student ownership checks
-|--------------------------------------------------------------------------
 */
 
 if (!defined('LIBRARY_HELPERS_LOADED')) {
@@ -89,24 +80,79 @@ if (!defined('LIBRARY_HELPERS_LOADED')) {
         return date('Y-m-d H:i:s');
     }
 
-    function nextBorrowDueDateTime(): string
+    function libraryNow(?string $dateTime = null): DateTime
     {
-        return date('Y-m-d 08:59:59', strtotime('+1 day'));
+        return new DateTime($dateTime ?? 'now', new DateTimeZone('Asia/Manila'));
     }
 
-    function nextReservationExpiryDateTime(int $days = 3): string {
-        $date = new DateTime();
+    function isLibrarySunday(?string $dateTime = null): bool
+    {
+        $dt = libraryNow($dateTime);
+        return (int)$dt->format('w') === 0;
+    }
 
-        // If past 5PM, start from tomorrow
-        if ((int)$date->format('H') >= 17) {
-            $date->modify('+1 day');
+    function isLibraryOpen(?string $dateTime = null): bool
+    {
+        $dt = libraryNow($dateTime);
+
+        if ((int)$dt->format('w') === 0) {
+            return false;
         }
 
-        $date->modify("+{$days} days");
-        $date->setTime(17, 0, 0);
+        $time = $dt->format('H:i:s');
 
+        return $time >= '07:00:00' && $time <= '17:00:00';
+    }
+
+    function libraryClosedMessage(): string
+    {
+        if (isLibrarySunday()) {
+            return 'Library is closed on Sunday. Only book viewing is available.';
+        }
+
+        return 'Library transactions are only allowed Monday to Saturday, 7:00 AM to 5:00 PM.';
+    }
+
+    function nextBorrowDueDateTime(?string $borrowDateTime = null): string
+    {
+        $date = libraryNow($borrowDateTime);
+        $date->modify('+1 day');
+        $date->setTime(8, 59, 59);
         return $date->format('Y-m-d H:i:s');
     }
+
+function nextReservationExpiryDateTime(int $days = 3, ?string $baseDateTime = null): string
+{
+    $date = addLibraryDays(libraryNow($baseDateTime), $days);
+    $date->setTime(17, 0, 0);
+    return $date->format('Y-m-d H:i:s');
+}
+
+function readyReservationExpiryDateTime(int $days = 3, ?string $baseDateTime = null): string
+{
+    $date = addLibraryDays(libraryNow($baseDateTime), $days);
+    $date->setTime(17, 0, 0);
+    return $date->format('Y-m-d H:i:s');
+}
+
+function addLibraryDays(DateTime $date, int $days): DateTime
+{
+    $result = clone $date;
+    $addedDays = 0;
+
+    while ($addedDays < $days) {
+        $result->modify('+1 day');
+
+        // Skip Sunday
+        if ((int)$result->format('w') === 0) {
+            continue;
+        }
+
+        $addedDays++;
+    }
+
+    return $result;
+}
 
     function isOverdue(?string $dueDate, ?string $returnDate = null): bool
     {
@@ -178,7 +224,6 @@ if (!defined('LIBRARY_HELPERS_LOADED')) {
         $dueDay = $due->format('Y-m-d');
         $retDay = $ret->format('Y-m-d');
 
-        // Same day: ₱2 per hour, capped at 5:00 PM
         if ($dueDay === $retDay) {
             $closing = new DateTime($dueDay . ' 17:00:00');
 
@@ -198,7 +243,6 @@ if (!defined('LIBRARY_HELPERS_LOADED')) {
             ];
         }
 
-        // Next day or more: ₱10 per day
         $daysLate = (new DateTime($dueDay))->diff(new DateTime($retDay))->days;
 
         return [
@@ -212,31 +256,16 @@ if (!defined('LIBRARY_HELPERS_LOADED')) {
 
     function getStudentDisplayName(array $row): string
     {
-        if (!empty($row['studentName'])) {
-            return (string) $row['studentName'];
-        }
-
-        if (!empty($row['user_fullname'])) {
-            return (string) $row['user_fullname'];
-        }
-
-        if (!empty($row['fullname'])) {
-            return (string) $row['fullname'];
-        }
-
+        if (!empty($row['studentName'])) return (string)$row['studentName'];
+        if (!empty($row['user_fullname'])) return (string)$row['user_fullname'];
+        if (!empty($row['fullname'])) return (string)$row['fullname'];
         return 'Unknown Student';
     }
 
     function getStudentIdValue(array $row): string
     {
-        if (!empty($row['student_id'])) {
-            return (string) $row['student_id'];
-        }
-
-        if (!empty($row['user_student_id'])) {
-            return (string) $row['user_student_id'];
-        }
-
+        if (!empty($row['student_id'])) return (string)$row['student_id'];
+        if (!empty($row['user_student_id'])) return (string)$row['user_student_id'];
         return '—';
     }
 
@@ -368,8 +397,7 @@ function reservationStatusBadgeClass(string $status): string
         'pending' => 'bg-gray-100 text-gray-700',
         'ready' => 'bg-blue-100 text-blue-700',
         'borrowed' => 'bg-gray-200 text-gray-700',
-        'cancelled' => 'bg-red-100 text-red-700',
-        'expired' => 'bg-red-100 text-red-700',
+        'cancelled', 'expired' => 'bg-red-100 text-red-700',
         default => 'bg-gray-100 text-gray-700',
     };
 }
@@ -403,7 +431,7 @@ function promoteNextPendingReservation(PDO $pdo, int $bookId): bool
         return false;
     }
 
-    $newExpiryDate = nextReservationExpiryDateTime(3);
+    $newExpiryDate = readyReservationExpiryDateTime(3);
 
     $readyStmt = $pdo->prepare("
         UPDATE reservations
@@ -432,7 +460,7 @@ function promoteNextPendingReservation(PDO $pdo, int $bookId): bool
             $notifyStudentName,
             'reservation_ready',
             'Book Ready for Pickup',
-            'Your reserved book is now available and ready for pickup.',
+            'Your reserved book is now available and ready for pickup until 5:00 PM.',
             'reservations.php'
         );
     }

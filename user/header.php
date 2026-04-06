@@ -11,15 +11,6 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'student') {
 }
 
 $currentPage = $currentPage ?? '';
-$studentName = $_SESSION['fullname'] ?? 'Student';
-$studentId   = $_SESSION['student_id'] ?? '—';
-$userId      = $_SESSION['user_id'] ?? null;
-
-function navClass($page, $currentPage) {
-    return $page === $currentPage
-        ? 'text-blue-600 border-b-2 border-blue-600'
-        : 'text-gray-700 hover:text-blue-600';
-}
 
 /* ================= DATABASE ================= */
 try {
@@ -36,6 +27,48 @@ try {
     setLibraryDbTimezone($pdo);
 } catch (PDOException $e) {
     die("Database error.");
+}
+
+$studentName = $_SESSION['fullname'] ?? 'Student';
+$studentId   = $_SESSION['student_id'] ?? '—';
+$userId      = $_SESSION['user_id'] ?? null;
+$studentProfileImage = null;
+
+/* ================= CURRENT STUDENT PROFILE DATA ================= */
+if ($userId) {
+    try {
+        $studentStmt = $pdo->prepare("
+            SELECT fullname, student_id, profile_image
+            FROM users
+            WHERE id = ? AND role = 'student'
+            LIMIT 1
+        ");
+        $studentStmt->execute([$userId]);
+        $studentData = $studentStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($studentData) {
+            $studentName = $studentData['fullname'] ?: $studentName;
+            $studentId = $studentData['student_id'] ?: $studentId;
+
+            if (!empty($studentData['profile_image'])) {
+                $studentProfileImage = "../uploads/profile_images/" . $studentData['profile_image'];
+            }
+
+            // keep session updated too
+            $_SESSION['fullname'] = $studentName;
+            $_SESSION['student_id'] = $studentId;
+
+            $_SESSION['profile_image'] = $studentData['profile_image'] ?? null;
+        }
+    } catch (PDOException $e) {
+        // keep fallback session values if query fails
+    }
+}
+
+function navClass($page, $currentPage) {
+    return $page === $currentPage
+        ? 'text-blue-600 border-b-2 border-blue-600'
+        : 'text-gray-700 hover:text-blue-600';
 }
 
 $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId, $studentName);
@@ -55,9 +88,9 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
         <div class="flex items-center justify-between h-20">
             
             <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center text-white text-2xl font-bold">
-                    📖
-                </div>
+                <img src="../assets/images/logo1.png" 
+                    alt="STI Logo" 
+                    class="h-12 w-auto object-contain">
                 <div>
                     <h1 class="text-2xl font-bold text-slate-900 leading-tight">STI College Ormoc</h1>
                     <p class="text-slate-500 text-sm">Library Management System</p>
@@ -114,19 +147,53 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
                 </div>
 
                 <!-- Student Info -->
-                <div class="bg-gray-100 rounded-2xl px-4 py-3 flex items-center gap-3">
-                    <div class="text-gray-600 text-lg">👤</div>
-                    <div class="leading-tight">
-                        <p class="font-semibold text-slate-900"><?= e($studentName) ?></p>
-                        <p class="text-sm text-slate-500"><?= e($studentId) ?></p>
+               <div class="relative">
+                    <button id="profileDropdownBtn"
+                        type="button"
+                        class="bg-gray-100 rounded-2xl px-4 py-3 flex items-center gap-3 hover:bg-gray-200 transition min-w-[270px]">
+                        
+                        <div class="w-11 h-11 rounded-full overflow-hidden bg-slate-200 border border-slate-300 shrink-0 flex items-center justify-center">
+                            <?php if (!empty($studentProfileImage)): ?>
+                                <img src="<?= e($studentProfileImage) ?>" alt="Profile" class="w-full h-full object-cover">
+                            <?php else: ?>
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-slate-500" viewBox="0 0 24 24" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.437-.695Z" clip-rule="evenodd" />
+                                </svg>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="leading-tight text-left min-w-0 flex-1">
+                            <p class="font-semibold text-slate-900 truncate"><?= e($studentName) ?></p>
+                            <p class="text-sm text-slate-500 truncate"><?= e($studentId) ?></p>
+                        </div>
+
+                        <svg xmlns="http://www.w3.org/2000/svg"
+                            class="w-5 h-5 text-slate-500 shrink-0"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                        </svg>
+                    </button>
+
+                    <div id="profileDropdownMenu"
+                        class="hidden absolute right-0 mt-3 w-52 bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden z-50">
+                        <a href="profile.php"
+                        class="block px-4 py-3 text-sm text-slate-700 hover:bg-gray-50">
+                            My Profile
+                        </a>
+                        <a href="../auth/logout.php"
+                        class="block px-4 py-3 text-sm text-red-600 hover:bg-red-50">
+                            <span></span> Logout
+                        </a>
                     </div>
                 </div>
 
                 <!-- Logout -->
-                <a href="../auth/logout.php"
+                <!-- <a href="../auth/logout.php"
                    class="border border-gray-300 rounded-2xl px-6 py-3 font-semibold text-slate-900 hover:bg-gray-50">
                     <span>↩</span> Logout
-                </a>
+                </a> -->
             </div>
         </div>
     </div>
@@ -154,6 +221,12 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
                    class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'reservations' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
                     Reservations
                 </a>
+
+                <a href="profile.php"
+                class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'profile' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
+                    Profile
+                </a>
+
             </nav>
         </div>
     </div>
@@ -424,5 +497,19 @@ async function deleteNotification(id) {
         await fetchNotifications();
     }
 }
+
+const profileDropdownBtn = document.getElementById('profileDropdownBtn');
+const profileDropdownMenu = document.getElementById('profileDropdownMenu');
+
+profileDropdownBtn?.addEventListener('click', function (e) {
+    e.stopPropagation();
+    profileDropdownMenu?.classList.toggle('hidden');
+});
+
+document.addEventListener('click', function (e) {
+    if (!profileDropdownBtn?.contains(e.target) && !profileDropdownMenu?.contains(e.target)) {
+        profileDropdownMenu?.classList.add('hidden');
+    }
+});
 
 </script>

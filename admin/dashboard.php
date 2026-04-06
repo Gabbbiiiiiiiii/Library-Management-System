@@ -33,6 +33,7 @@ $currentPage = 'dashboard';
 $pdo = new PDO("mysql:host=localhost;dbname=sti_library", "root", "");
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 setLibraryDbTimezone($pdo);
+processExpiredReservations($pdo);
 
 /* ================= AUTO UPDATE OVERDUE ================= */
 $pdo->exec("

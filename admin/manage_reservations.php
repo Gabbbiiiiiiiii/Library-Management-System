@@ -70,6 +70,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pickup_id'])) {
         die("❌ Invalid CSRF token.");
     }
 
+    if (!isLibraryOpen()) {
+    $_SESSION['reservation_error'] = libraryClosedMessage();
+    header("Location: manage_reservations.php?tab=ready");
+    exit();
+    }
+
     $pickupId = (int)($_POST['pickup_id'] ?? 0);
 
     if ($pickupId < 1) {
@@ -112,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pickup_id'])) {
 
     try {
         $borrowDate = nowDateTime();
-        $dueDate = nextBorrowDueDateTime();
+        $dueDate = nextBorrowDueDateTime($borrowDate);
 
         $insertBorrowing = $pdo->prepare("
             INSERT INTO borrowings (
@@ -516,7 +522,13 @@ unset($_SESSION['reservation_success'], $_SESSION['reservation_error']);
                             </div>
                             <?php if ($row['status'] === 'ready'): ?>
                                 <div class="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800">
-                                    <p class="font-medium">Book is ready for pickup!</p>
+                                    
+                                    <p class="flex items-center gap-2 font-medium text-green-900">
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="w-5 h-5 text-green-700">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+    </svg>
+    Book is ready for pickup!
+</p>
                                     <p class="mt-1 text-xs">
                                         Pickup Until <?= e(formatDateText($row['expiryDate'])) ?>
                                     </p>

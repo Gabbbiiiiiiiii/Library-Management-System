@@ -40,65 +40,7 @@ $pdo->exec("
 
 /* ================= HANDLE RETURN ================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['return_id'])) {
-
-    if (!hash_equals($_SESSION['token'], $_POST['token'] ?? '')) {
-        die("❌ Invalid CSRF token.");
-    }
-
-    $returnId = (int) $_POST['return_id'];
-
-    $stmt = $pdo->prepare("
-        SELECT id, book_id, status, dueDate, returnDate
-        FROM borrowings
-        WHERE id = ?
-        LIMIT 1
-    ");
-    $stmt->execute([$returnId]);
-    $borrowing = $stmt->fetch();
-
-    if (!$borrowing) {
-        die("❌ Borrowing record not found.");
-    }
-
-    if ($borrowing['status'] === 'returned' || !empty($borrowing['returnDate'])) {
-        header("Location: manage_borrowings.php");
-        exit();
-    }
-
-    $penalty = 0.00;
-    $today = new DateTime();
-    $dueDate = !empty($borrowing['dueDate']) ? new DateTime($borrowing['dueDate']) : null;
-
-    if ($dueDate && $today > $dueDate) {
-        $daysLate = $dueDate->diff($today)->days;
-        $penalty = $daysLate * 5.00; // change this if you want another penalty rate
-    }
-
-    $pdo->beginTransaction();
-
-    try {
-        $updateBorrowing = $pdo->prepare("
-            UPDATE borrowings
-            SET status = 'returned',
-                returnDate = NOW(),
-                penalty = ?
-            WHERE id = ?
-        ");
-        $updateBorrowing->execute([$penalty, $returnId]);
-
-        $updateBook = $pdo->prepare("
-            UPDATE books
-            SET availableCopies = availableCopies + 1
-            WHERE id = ?
-        ");
-        $updateBook->execute([$borrowing['book_id']]);
-
-        $pdo->commit();
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        die("❌ Failed to return book.");
-    }
-
+    $_SESSION['error_message'] = 'Please process returns in the Process Returns page.';
     header("Location: manage_borrowings.php");
     exit();
 }
@@ -274,6 +216,13 @@ function getYearLevelValue(array $row): string {
     </a>
 </div>
 
+<?php if (!empty($_SESSION['error_message'])): ?>
+    <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+        <?= e($_SESSION['error_message']) ?>
+    </div>
+    <?php unset($_SESSION['error_message']); ?>
+<?php endif; ?>
+
     <!-- STATS -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-7">
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
@@ -385,8 +334,8 @@ function getYearLevelValue(array $row): string {
                     $yearlvl = getYearLevelValue($row);
 
                     $cover = !empty($row['book_cover'])
-                        ? $row['book_cover']
-                        : 'https://placehold.co/100x140?text=No+Cover';
+                    ? '/library-management-system/admin/' . ltrim($row['book_cover'], '/')
+                    : 'https://placehold.co/100x140?text=No+Cover';
                 ?>
 
                 <div class="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
@@ -487,34 +436,10 @@ function getYearLevelValue(array $row): string {
                             </div>
 
                             <?php if ($row['status'] !== 'returned'): ?>
-                                <div class="mt-4 flex gap-2">
-                                    <form method="POST" onsubmit="return confirm('Mark this book as returned?')">
-                                        <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
-                                        <input type="hidden" name="return_id" value="<?= e($row['id']) ?>">
-                                        <?php if ($row['status'] === 'borrowed'): ?>
-    
-                                            <!-- ACTIVE BADGE -->
-                                            <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                                                <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                                                Active
-                                            </span>
-
-                                        <?php elseif ($row['status'] === 'returned'): ?>
-
-                                            <!-- RETURNED BADGE -->
-                                            <span class="px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700">
-                                                Returned
-                                            </span>
-
-                                        <?php elseif ($row['status'] === 'overdue'): ?>
-
-                                            <!-- OVERDUE BADGE -->
-                                            <span class="px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                                                Overdue
-                                            </span>
-
-                                        <?php endif; ?>
-                                    </form>
+                                <div class="mt-4">
+                                    <p class="text-sm text-gray-500">
+                                        Returns are processed in the <span class="font-medium text-purple-700">Returns</span> page.
+                                    </p>
                                 </div>
                             <?php endif; ?>
                         </div>

@@ -310,7 +310,7 @@ usort($returnedBorrowings, function ($a, $b) {
                 <li>Late by 1 day or more: ₱10 per day</li>
             </ul>
             <p class="text-xs text-gray-500 mt-4">
-                Note: Penalties are calculated based on library operating hours (Mon-Sat, 5am-5pm).
+                Note: Penalties are calculated based on library operating hours (Mon-Sat, 7am-5pm).
                 Hours outside of operating times are not counted.
             </p>
         </div>
