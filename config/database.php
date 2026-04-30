@@ -5,9 +5,9 @@ $user = "root";
 $password = "";
 $database = "sti_library";
 
-$conn = mysqli_connect($host, $user, $password, $database);
+$conn = new mysqli($host, $user, $password, $database);
 
-if (!$conn) {
-    die("Connection failed: " . mysqli_connect_error());
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
 }
 ?>

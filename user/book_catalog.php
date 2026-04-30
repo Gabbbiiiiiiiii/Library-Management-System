@@ -224,6 +224,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit();
     }
 
+// 🚫 CHECK IF USER IS CURRENTLY BORROWING THIS SAME BOOK
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM borrowings
+        WHERE user_id = ?
+          AND book_id = ?
+          AND status IN ('borrowed', 'overdue')
+    ");
+    $stmt->execute([$userId, $bookId]);
+
+    if ($stmt->fetchColumn() > 0) {
+        $_SESSION['error_message'] = "You cannot reserve the book you are currently borrowing.";
+        header("Location: book_catalog.php");
+        exit();
+    }
+
     $stmt = $pdo->prepare("
         SELECT COUNT(*)
         FROM reservations
@@ -330,7 +346,7 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
 
 <?php include 'header.php'; ?>
 
-<main class="max-w-[1489px] mx-auto px-6 pt-40 pb-10">
+<main class="max-w-[1489px] mx-auto px-4 sm:px-6 pt-28 sm:pt-32 md:pt-40 pb-8 sm:pb-10">
 
     <!-- PAGE HEADER -->
     <section class="mb-8">
@@ -402,164 +418,232 @@ $categories = $categoryStmt->fetchAll(PDO::FETCH_COLUMN);
             <p class="text-slate-500 text-lg">No books found matching your search.</p>
         </div>
     <?php else: ?>
-        <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <?php foreach ($books as $book): ?>
+    <section class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <?php foreach ($books as $book): ?>
                 <?php
                     $base = '/library-management-system/admin/';
                     $cover = !empty($book['coverImage'])
                         ? $base . ltrim($book['coverImage'], '/')
                         : 'https://placehold.co/400x520?text=No+Cover';
                     $isAvailable = (int)$book['availableCopies'] > 0;
-                    $modalId = 'bookModal' . (int)$book['id'];
+                    $detailsModalId = 'detailsModal' . (int)$book['id'];
+                    $confirmModalId = 'confirmModal' . (int)$book['id'];
                     
                 ?>
-                <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
-                    <div class="relative aspect-[3/4]">
-                        <img src="<?= e($cover) ?>"
-                             onerror="this.src='https://placehold.co/400x520?text=No+Cover'"
-                            alt="<?= e($book['title']) ?>"
-                            class="w-full h-full object-cover"
-                        >
-                        <div class="absolute top-3 right-3">
-                            <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= $isAvailable ? 'bg-blue-950 text-white' : 'bg-gray-300 text-gray-800' ?>">
-                                <?= $isAvailable ? 'Available' : 'Not Available' ?>
-                            </span>
-                        </div>
-                    </div>
+            <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm hover:shadow-lg transition-all hover:-translate-y-1">
+    <!-- COVER -->
+    <div
+        class="relative aspect-[3/4] group cursor-pointer overflow-hidden"
+        onclick="openBookModal('<?= e($detailsModalId) ?>')"
+    >
+        <img
+            src="<?= e($cover) ?>"
+            onerror="this.src='https://placehold.co/400x520?text=No+Cover'"
+            alt="<?= e($book['title']) ?>"
+            class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+        >
 
-                    <div class="p-4">
-                        <h3 class="text-xl font-semibold text-slate-900 leading-snug min-h-[56px]">
+        <div class="absolute inset-0 bg-black/40 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition duration-300 flex items-center justify-center">
+            <span class="text-white text-sm font-semibold tracking-wide px-4 py-2 rounded-full backdrop-blur-md border border-white/20 bg-white/10">
+                <?= $isAvailable ? 'View & Borrow' : 'View & Reserve' ?>
+            </span>
+        </div>
+
+        <div class="absolute top-3 right-3 z-10">
+            <span class="inline-flex px-3 py-1 rounded-full text-xs font-semibold <?= $isAvailable ? 'bg-blue-950 text-white' : 'bg-red-300 text-red-800' ?>">
+                <?= $isAvailable ? 'Available' : 'Not Available' ?>
+            </span>
+        </div>
+    </div>
+
+    <!-- CARD INFO -->
+<div class="p-3">
+    <h3 class="text-sm font-semibold leading-snug min-h-[40px]">
+            <?= e($book['title']) ?>
+        </h3>
+        <p class="mt-1 text-xs text-slate-600"> <?= e($book['author']) ?></p>
+
+        <div class="mt-4 text-sm text-slate-500 space-y-1">
+            <!-- <p>ISBN: <?= e($book['isbn']) ?></p> -->
+            <p>Category: <?= e($book['category']) ?></p>
+            <p>Copies: <?= e($book['availableCopies']) ?>/<?= e($book['totalCopies']) ?></p>
+        </div>
+    </div>
+</div>
+
+<!-- DETAILS MODAL -->
+<div id="<?= e($detailsModalId) ?>" class="fixed inset-0 hidden z-50">
+    <div class="absolute inset-0 bg-black/50" onclick="closeBookModal('<?= e($detailsModalId) ?>')"></div>
+
+    <div class="relative flex min-h-screen items-center justify-center p-3 sm:p-4">
+        <div class="w-full max-w-2xl rounded-2xl bg-white shadow-xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div class="border-b px-4 sm:px-6 py-4 shrink-0">
+                <h2 class="text-lg sm:text-xl font-bold text-gray-900">Book Details</h2>
+                <p class="text-sm text-gray-600 mt-1">
+                    Review the book information before you continue.
+                </p>
+            </div>
+
+            <div class="p-4 sm:p-6 overflow-y-auto">
+                <div class="flex flex-col sm:flex-row gap-4 sm:gap-6">
+                    <img
+                        src="<?= e($cover) ?>"
+                        alt="<?= e($book['title']) ?>"
+                        class="w-28 h-40 sm:w-40 sm:h-56 object-cover rounded-xl border mx-auto sm:mx-0 shrink-0"
+                    >
+
+                    <div class="flex-1 min-w-0">
+                        <h3 class="text-xl sm:text-2xl font-bold text-slate-900 break-words">
                             <?= e($book['title']) ?>
                         </h3>
-                        <p class="mt-1 text-slate-600"><?= e($book['author']) ?></p>
+                        <p class="mt-1 text-sm text-slate-600 break-words"><?= e($book['author']) ?></p>
 
-                        <p class="text-xs text-gray-500 mt-3 font-medium">Description</p>
-
-                        <div class="mt-1 text-sm text-gray-500">
-                            <span id="short-<?= $book['id'] ?>">
-                                <?= highlight(mb_strimwidth($book['description'], 0, 120, '...'), $search ?? '') ?>
-                            </span>
-
-                            <span id="full-<?= $book['id'] ?>" class="hidden">
-                                <?= highlight($book['description'], $search ?? '') ?>
-                            </span>
-
-                            <button
-                                type="button"
-                                onclick="toggleDesc(<?= $book['id'] ?>)"
-                                class="text-blue-600 hover:underline ml-1"
-                            >
-                                Read more
-                            </button>
+                        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-slate-600">
+                            <p class="break-words">
+                                <span class="font-semibold text-slate-800">ISBN:</span>
+                                <?= e($book['isbn']) ?>
+                            </p>
+                            <p class="break-words">
+                                <span class="font-semibold text-slate-800">Category:</span>
+                                <?= e($book['category']) ?>
+                            </p>
+                            <p>
+                                <span class="font-semibold text-slate-800">Copies:</span>
+                                <?= e($book['availableCopies']) ?>/<?= e($book['totalCopies']) ?>
+                            </p>
+                            <p class="flex flex-wrap items-center gap-2">
+                                <span class="font-semibold text-slate-800">Status:</span>
+                                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold <?= $isAvailable ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' ?>">
+                                    <?= $isAvailable ? 'Available' : 'Not Available' ?>
+                                </span>
+                            </p>
                         </div>
 
-                        <div class="mt-4 text-sm text-slate-500 space-y-1">
-                            <p>ISBN: <?= e($book['isbn']) ?></p>
-                            <p>Category: <?= e($book['category']) ?></p>
-                            <p>Copies: <?= e($book['availableCopies']) ?>/<?= e($book['totalCopies']) ?></p>
-                        </div>
-
-                       <button
-                            type="button"
-                            onclick="openBookModal('<?= e($modalId) ?>')"
-                            class="mt-5 w-full rounded-xl px-4 py-3 font-semibold text-white
-                            <?= !$libraryOpenNow
-                                ? 'bg-gray-400 cursor-not-allowed'
-                                : ($isAvailable ? 'bg-blue-950 hover:bg-blue-900' : 'bg-orange-500 hover:bg-orange-600') ?>"
-                            <?= !$libraryOpenNow ? 'disabled' : '' ?>
-                            title="<?= !$libraryOpenNow ? e($libraryClosedText) : '' ?>"
-                        >
-                            <?= !$libraryOpenNow ? 'Library Closed' : ($isAvailable ? 'Borrow' : 'Reserve') ?>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- MODAL -->
-                <div id="<?= e($modalId) ?>" class="fixed inset-0 hidden z-50">
-                    <div class="absolute inset-0 bg-black/50" onclick="closeBookModal('<?= e($modalId) ?>')"></div>
-
-                    <div class="relative flex min-h-screen items-center justify-center p-4">
-                        <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl overflow-hidden">
-                            <div class="border-b px-6 py-4">
-                                <h2 class="text-xl font-bold text-gray-900">
-                                    <?= $isAvailable ? 'Borrow Book' : 'Reserve Book' ?>
-                                </h2>
-                                <p class="text-sm text-gray-600 mt-1">
-                                    <?= $isAvailable ? 'Are you sure you want to borrow this book?' : 'Are you sure you want to reserve this book?' ?>
-                                </p>
-                            </div>
-
-                            <div class="p-6">
-                                <div class="flex gap-4">
-                                    <img
-                                        src="<?= e($cover) ?>"
-                                        alt="<?= e($book['title']) ?>"
-                                        class="w-20 h-28 object-cover rounded border"
-                                    >
-                                    <div>
-                                        <h4 class="font-semibold text-gray-900"><?= e($book['title']) ?></h4>
-                                        <p class="text-sm text-gray-600"><?= e($book['author']) ?></p>
-                                        <p class="text-xs text-gray-500 mt-2">ISBN: <?= e($book['isbn']) ?></p>
-
-                                        <!-- DESCRIPTION -->
-                                        <?php if (!empty($book['description'])): ?>
-                                            <div class="mt-3 text-sm text-gray-700 leading-relaxed max-h-24 overflow-y-auto pr-1">
-                                                <?= e($book['description']) ?>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
+                        <?php if (!empty($book['description'])): ?>
+                            <div class="mt-5">
+                                <h4 class="text-sm font-semibold text-slate-800 mb-2">Description</h4>
+                                <div class="text-sm text-gray-700 leading-relaxed max-h-40 overflow-y-auto pr-1 sm:pr-2 break-words">
+                                    <?= nl2br(e($book['description'])) ?>
                                 </div>
-
-                                <?php if ($isAvailable): ?>
-                                    <div class="mt-4 rounded-lg bg-blue-50 p-4 text-sm">
-                                        <p class="font-semibold text-blue-900">Borrowing Terms:</p>
-                                        <ul class="list-disc list-inside mt-2 text-blue-800 space-y-1">
-                                            <li>Borrowing period: 1 day</li>
-                                            <li>Return by: Next day at 08:59 AM</li>
-                                            <li>Late fee: ₱2 per hour after 8:59 AM until 5:00 PM only</li>
-                                            <li>Starting the next day: ₱10 per day</li>
-                                        </ul>
-                                    </div>
-                                <?php endif; ?>
                             </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
 
-                            <div class="flex justify-end gap-3 border-t px-6 py-4">
-                                <button
-                                    type="button"
-                                    onclick="closeBookModal('<?= e($modalId) ?>')"
-                                    class="rounded-lg border px-4 py-2 hover:bg-gray-100"
-                                >
-                                    Cancel
-                                </button>
+            <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 border-t px-4 sm:px-6 py-4 shrink-0">
+                <button
+                    type="button"
+                    onclick="closeBookModal('<?= e($detailsModalId) ?>')"
+                    class="w-full sm:w-auto rounded-lg border px-4 py-2 hover:bg-gray-100"
+                >
+                    Close
+                </button>
 
-                                <?php if ($libraryOpenNow): ?>
-                                <form method="POST">
-                                    <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
-                                    <input type="hidden" name="book_id" value="<?= e($book['id']) ?>">
-                                    <input type="hidden" name="action" value="<?= $isAvailable ? 'borrow' : 'reserve' ?>">
+                <?php if ($libraryOpenNow): ?>
+                    <button
+                        type="button"
+                        onclick="closeBookModal('<?= e($detailsModalId) ?>'); openBookModal('<?= e($confirmModalId) ?>')"
+                        class="w-full sm:w-auto rounded-lg px-4 py-2 text-white font-semibold <?= $isAvailable ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600' ?>"
+                    >
+                        <?= $isAvailable ? 'Borrow Book' : 'Reserve Book' ?>
+                    </button>
+                <?php else: ?>
+                    <button
+                        type="button"
+                        disabled
+                        class="w-full sm:w-auto rounded-lg bg-gray-300 px-4 py-2 text-gray-600 cursor-not-allowed"
+                        title="<?= e($libraryClosedText) ?>"
+                    >
+                        Library Closed
+                    </button>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- CONFIRM MODAL -->
+<div id="<?= e($confirmModalId) ?>" class="fixed inset-0 hidden z-50">
+    <div class="absolute inset-0 bg-black/50" onclick="closeBookModal('<?= e($confirmModalId) ?>')"></div>
 
-                                    <button
-                                        type="submit"
-                                        class="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-                                    >
-                                        Confirm
-                                    </button>
-                                </form>
-                            <?php else: ?>
-                                <button
-                                    type="button"
-                                    disabled
-                                    class="rounded-lg bg-gray-300 px-4 py-2 text-gray-600 cursor-not-allowed"
-                                    title="<?= e($libraryClosedText) ?>"
-                                >
-                                    Library Closed
-                                </button>
-                            <?php endif; ?>
-                            </div>
-                        </div>
+    <div class="relative flex min-h-screen items-center justify-center p-3 sm:p-4">
+        <div class="w-full max-w-lg rounded-2xl bg-white shadow-xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div class="border-b px-4 sm:px-6 py-4 shrink-0">
+                <h2 class="text-lg sm:text-xl font-bold text-gray-900">
+                    <?= $isAvailable ? 'Confirm Borrow' : 'Confirm Reservation' ?>
+                </h2>
+                <p class="text-sm text-gray-600 mt-1">
+                    <?= $isAvailable
+                        ? 'Are you sure you want to borrow this book?'
+                        : 'Are you sure you want to reserve this book?' ?>
+                </p>
+            </div>
+
+            <div class="p-4 sm:p-6 overflow-y-auto">
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <img
+                        src="<?= e($cover) ?>"
+                        alt="<?= e($book['title']) ?>"
+                        class="w-24 h-32 sm:w-20 sm:h-28 object-cover rounded border mx-auto sm:mx-0 shrink-0"
+                    >
+                    <div class="min-w-0">
+                        <h4 class="font-semibold text-gray-900 text-base sm:text-lg break-words">
+                            <?= e($book['title']) ?>
+                        </h4>
+                        <p class="text-sm text-gray-600 break-words"><?= e($book['author']) ?></p>
+                        <p class="text-xs text-gray-500 mt-2 break-words">ISBN: <?= e($book['isbn']) ?></p>
                     </div>
                 </div>
 
+                <?php if ($isAvailable): ?>
+                    <div class="mt-4 rounded-lg bg-blue-50 p-4 text-sm">
+                        <p class="font-semibold text-blue-900">Borrowing Terms:</p>
+                        <ul class="list-disc list-inside mt-2 text-blue-800 space-y-1">
+                            <li>Borrowing period: 1 day</li>
+                            <li>Return by: Next day at 08:59 AM</li>
+                            <li>Late fee: ₱2 per hour after 8:59 AM until 5:00 PM only</li>
+                            <li>Starting the next day: ₱10 per day</li>
+                        </ul>
+                    </div>
+                <?php endif; ?>
+            </div>
+
+            <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 border-t px-4 sm:px-6 py-4 shrink-0">
+                <button
+                    type="button"
+                    onclick="closeBookModal('<?= e($confirmModalId) ?>')"
+                    class="w-full sm:w-auto rounded-lg border px-4 py-2 hover:bg-gray-100"
+                >
+                    Cancel
+                </button>
+
+                <?php if ($libraryOpenNow): ?>
+                    <form method="POST" class="w-full sm:w-auto">
+                        <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
+                        <input type="hidden" name="book_id" value="<?= e($book['id']) ?>">
+                        <input type="hidden" name="action" value="<?= $isAvailable ? 'borrow' : 'reserve' ?>">
+
+                        <button
+                            type="submit"
+                            class="w-full sm:w-auto rounded-lg <?= $isAvailable ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-500 hover:bg-orange-600' ?> px-4 py-2 text-white"
+                        >
+                            Confirm
+                        </button>
+                    </form>
+                <?php else: ?>
+                    <button
+                        type="button"
+                        disabled
+                        class="w-full sm:w-auto rounded-lg bg-gray-300 px-4 py-2 text-gray-600 cursor-not-allowed"
+                        title="<?= e($libraryClosedText) ?>"
+                    >
+                        Library Closed
+                    </button>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
             <?php endforeach; ?>
         </section>
     <?php endif; ?>
@@ -608,21 +692,16 @@ if (searchInput) {
     });
 }
 
-function toggleDesc(id) {
-    const shortText = document.getElementById('short-' + id);
-    const fullText = document.getElementById('full-' + id);
-    const btn = event.target;
-
-    if (fullText.classList.contains('hidden')) {
-        shortText.classList.add('hidden');
-        fullText.classList.remove('hidden');
-        btn.innerText = "Show less";
-    } else {
-        shortText.classList.remove('hidden');
-        fullText.classList.add('hidden');
-        btn.innerText = "Read more";
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('[id^="detailsModal"], [id^="confirmModal"]').forEach(modal => {
+            if (!modal.classList.contains('hidden')) {
+                modal.classList.add('hidden');
+                document.body.classList.remove('overflow-hidden');
+            }
+        });
     }
-}
+});
 
 </script>
 

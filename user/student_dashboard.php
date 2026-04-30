@@ -226,10 +226,10 @@ $currentBorrowings = $stmt->fetchAll();
 
     <!-- WELCOME -->
     <section class="mb-8">
-        <h1 class="text-5xl font-bold text-slate-900 leading-tight">
+        <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold text-slate-900 leading-tight break-words">
             Welcome back, <?= e($studentName) ?>!
         </h1>
-        <p class="mt-3 text-3xl text-slate-600">
+        <p class="mt-3 text-xl sm:text-2xl lg:text-3xl text-slate-600 break-all sm:break-normal">
             Student ID: <?= e($studentId ?: '—') ?>
         </p>
     </section>

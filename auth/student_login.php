@@ -3,7 +3,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-include "../config/database.php";
+require_once __DIR__ . "/../config/database.php";
 
 $error = "";
 
@@ -47,20 +47,52 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <html>
 <head>
     <title>Student Login</title>
-    <link rel="stylesheet" href="../assets/css/style.css">
-    <style>
-        .password-container {
-            position: relative;
-        }
-        .toggle-password {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            cursor: pointer;
-            user-select: none;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/library-management-system/assets/images/logo1.png">
+    <link rel="shortcut icon" href="/library-management-system/assets/images/logo1.png">
+    <link rel="stylesheet" href="/library-management-system/assets/css/style.css">
+
+     <style>
+    .password-container {
+        position: relative;
+    }
+
+    .toggle-password {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .register-link-wrap {
+        text-align: center;
+        margin-top: 15px;
+        font-size: 14px;
+    }
+
+    .register-link-wrap p {
+        display: inline;
+        font-size: 14px;
+        color: #333;
+    }
+
+    .register-link-btn {
+        display: inline-block;
+        padding: 8px 10px;
+        color: #0a1f44;
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+        border-radius: 999px;
+        transition: all 0.3s ease;
+    }
+
+    .register-link-btn:hover {
+        color: var(--accent);
+    }
+</style>
 </head>
 <body>
 
@@ -82,14 +114,27 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <label>Student ID</label>
         <input type="text" name="student_id" required>
 
-        <label>Password</label>
+        <label for="password">Password</label>
         <div class="password-container">
             <input type="password" name="password" id="password" required>
-            <span class="toggle-password" onclick="togglePassword()">👁️</span>
+            <button type="button" class="toggle-password" onclick="togglePassword(this, 'password')" aria-label="Show password">
+                <svg class="eye-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path class="eye-outline" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.269 2.943 9.542 7-1.273 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z"/>
+                    <circle class="eye-pupil" cx="12" cy="12" r="3" stroke-width="2"/>
+                    <path class="eye-slash" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 4L20 20"/>
+                </svg>
+            </button>
         </div>
 
         <button type="submit">Sign In</button>
     </form>
+    
+    <div class="register-link-wrap">
+        <p>Don't have an account?</p>
+        <a href="register.php" class="register-link-btn">Register</a>
+    </div>
 
     <div style="text-align:center; margin-top:15px;">
         <a href="../index.php" style="font-size:14px; color:#002147; text-decoration:none;">
@@ -108,13 +153,18 @@ setTimeout(function(){
     }
 }, 3000);
 
-function togglePassword() {
-    let passwordInput = document.getElementById("password");
-    if(passwordInput.type === "password"){
-        passwordInput.type = "text";
-    } else {
-        passwordInput.type = "password";
-    }
+function togglePassword(button, inputId) {
+    const input = document.getElementById(inputId);
+    const icon = button.querySelector(".eye-icon");
+    const isHidden = input.type === "password";
+
+    input.type = isHidden ? "text" : "password";
+    icon.classList.toggle("is-open", isHidden);
+
+    button.setAttribute(
+        "aria-label",
+        isHidden ? "Hide password" : "Show password"
+    );
 }
 </script>
 

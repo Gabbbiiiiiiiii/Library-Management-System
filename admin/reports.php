@@ -128,6 +128,13 @@ $stmt = $pdo->prepare("SELECT COUNT(*) FROM borrowings $borrowWhere");
 $stmt->execute($borrowParams);
 $totalBorrowings = (int)$stmt->fetchColumn();
 
+/* ================= OVERALL PENALTY ================= */
+$stmt = $pdo->query("
+    SELECT COALESCE(SUM(penalty), 0) AS overall_penalty
+    FROM borrowings
+");
+$overallPenalty = $stmt->fetchColumn();
+
 /* Filtered returns */
 $stmt = $pdo->prepare("SELECT COUNT(*) FROM returns $returnWhere");
 $stmt->execute($returnParams);
@@ -171,21 +178,42 @@ $topBooks = $stmt->fetchAll();
 
 /* ================= MOST ACTIVE STUDENTS ================= */
 $stmt = $pdo->prepare("
-    SELECT
-        COALESCE(studentName, 'Unknown Student') AS student_name,
-        COALESCE(student_id, 'N/A') AS student_id,
-        COALESCE(course, 'N/A') AS course,
-        COALESCE(yearlvl, 'N/A') AS yearlvl,
-        COUNT(id) AS total_borrowings,
-        COALESCE(SUM(penalty), 0) AS total_penalty
-    FROM borrowings
+        SELECT
+        COALESCE(b.studentName, 'Unknown Student') AS student_name,
+        COALESCE(b.student_id, 'N/A') AS student_id,
+        COALESCE(u.course, 'N/A') AS course,
+        COALESCE(u.yearlvl, 'N/A') AS yearlvl,
+        COUNT(b.id) AS total_borrowings,
+        COALESCE(SUM(b.penalty), 0) AS total_penalty
+    FROM borrowings b
+    LEFT JOIN users u ON b.student_id = u.student_id
     $borrowWhere
-    GROUP BY studentName, student_id, course, yearlvl
-    ORDER BY total_borrowings DESC, student_name ASC
-    LIMIT 5
+    GROUP BY b.student_id, u.course, u.yearlvl
+    ORDER BY total_borrowings DESC
+    LIMIT 10
 ");
 $stmt->execute($borrowParams);
 $topStudents = $stmt->fetchAll();
+
+/* ================= HIGHEST PENALTY STUDENTS ================= */
+$stmt = $pdo->prepare("
+    SELECT
+        COALESCE(b.studentName, 'Unknown Student') AS student_name,
+        COALESCE(b.student_id, 'N/A') AS student_id,
+        COALESCE(u.course, 'N/A') AS course,
+        COALESCE(u.yearlvl, 'N/A') AS yearlvl,
+        COALESCE(SUM(b.penalty), 0) AS total_penalty,
+        SUM(CASE WHEN b.penalty > 0 THEN 1 ELSE 0 END) AS penalty_count
+    FROM borrowings b
+    LEFT JOIN users u ON b.student_id = u.student_id
+    $borrowWhere
+    GROUP BY b.student_id, u.course, u.yearlvl
+    HAVING total_penalty > 0
+    ORDER BY total_penalty DESC
+    LIMIT 10
+");
+$stmt->execute($borrowParams);
+$penaltyStudents = $stmt->fetchAll();
 
 /* ================= BORROWINGS BY CATEGORY ================= */
 $stmt = $pdo->prepare("
@@ -253,20 +281,19 @@ $reservationCreatedSummary = $stmt->fetch() ?: [
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
-
+<div class="max-w-[1489px] mx-auto px-4 sm:px-6 pt-36 md:pt-40 pb-10">
     <!-- PAGE HEADER -->
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Reports</h1>
         <p class="text-gray-600 mt-2 text-lg">View borrowings, returns, reservations, penalties, and library usage.</p>
     </div>
 
-    <div class="mb-6">
+<div class="mb-6">
     <a href="export_reports_csv.php?filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
-       class="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700">
+       class="inline-flex w-full sm:w-auto justify-center items-center rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700">
         Export Reports CSV
     </a>
-    </div>
+</div>
 
     <!-- FILTER -->
     <div class="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm mb-8">
@@ -381,22 +408,42 @@ $reservationCreatedSummary = $stmt->fetch() ?: [
 
     <!-- SECOND ROW CARDS -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Penalty Collected (Selected Period)</p>
-            <h2 class="text-3xl font-bold text-yellow-600 mt-4">₱<?= number_format($totalPenaltyCollected, 2) ?></h2>
+
+        <!-- Selected Period Penalty -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <p class="text-sm text-gray-500 mb-2">
+                Penalty Collected (Selected Period)
+            </p>
+
+            <h2 class="text-3xl font-bold text-yellow-600">
+                ₱<?= number_format($totalPenaltyCollected ?? 0, 2) ?>
+            </h2>
+        </div>
+
+        <!-- Overall Penalty -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <p class="text-sm text-gray-500 mb-2">
+                Total Penalties Collected (Overall)
+            </p>
+
+            <h2 class="text-3xl font-bold text-yellow-600">
+                ₱<?= number_format($overallPenalty ?? 0, 2) ?>
+            </h2>
         </div>
     </div>
 
-    <!-- TOP BOOKS + TOP STUDENTS -->
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
+    <!-- TOP BOOKS + STUDENTS -->
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+
+    <!-- MOST BORROWED BOOKS -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
             <h2 class="text-xl font-semibold text-gray-900 mb-5">Most Borrowed Books</h2>
 
             <?php if (empty($topBooks)): ?>
                 <p class="text-gray-500">No borrowing data available for this period.</p>
             <?php else: ?>
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="min-w-[700px] w-full text-sm">
                         <thead>
                             <tr class="border-b text-left text-gray-500">
                                 <th class="py-3 pr-4">Title</th>
@@ -420,36 +467,68 @@ $reservationCreatedSummary = $stmt->fetch() ?: [
             <?php endif; ?>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <h2 class="text-xl font-semibold text-gray-900 mb-5">Most Active Students</h2>
+    <!-- MOST ACTIVE STUDENTS -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+    <h2 class="text-xl font-semibold text-gray-900 mb-5">Most Active Students</h2>
 
-            <?php if (empty($topStudents)): ?>
-                <p class="text-gray-500">No student data available for this period.</p>
-            <?php else: ?>
-                <div class="space-y-4">
-                    <?php foreach ($topStudents as $student): ?>
-                        <div class="border rounded-xl p-4">
-                            <div class="flex justify-between items-start gap-4">
-                                <div>
-                                    <h3 class="font-semibold text-gray-900"><?= e($student['student_name']) ?></h3>
-                                    <p class="text-sm text-gray-500">Student ID: <?= e($student['student_id']) ?></p>
-                                    <p class="text-sm text-gray-500"><?= e($student['course']) ?> • <?= e($student['yearlvl']) ?></p>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-lg font-bold text-purple-600"><?= e((int)$student['total_borrowings']) ?></p>
-                                    <p class="text-xs text-gray-500">Borrowings</p>
-                                </div>
-                            </div>
-
-                            <div class="mt-3 text-sm text-gray-600">
-                                Total Penalty: <span class="font-semibold text-yellow-600">₱<?= number_format((float)$student['total_penalty'], 2) ?></span>
-                            </div>
+    <?php if (empty($topStudents)): ?>
+        <p class="text-gray-500">No student data available for this period.</p>
+    <?php else: ?>
+        <div class="max-h-[420px] overflow-y-auto pr-1 space-y-3">
+            <?php foreach ($topStudents as $student): ?>
+                <div class="border rounded-xl p-4">
+                    <div class="flex justify-between items-start gap-4">
+                        <div>
+                            <h3 class="font-semibold text-gray-900"><?= e($student['student_name']) ?></h3>
+                            <p class="text-sm text-gray-500">Student ID: <?= e($student['student_id']) ?></p>
+                            <p class="text-sm text-gray-500"><?= e($student['course']) ?> • <?= e($student['yearlvl']) ?></p>
                         </div>
-                    <?php endforeach; ?>
+
+                        <div class="text-right min-w-[90px]">
+                            <p class="text-lg font-bold text-purple-600"><?= e((int)$student['total_borrowings']) ?></p>
+                            <p class="text-xs text-gray-500">Borrowings</p>
+                        </div>
+                    </div>
                 </div>
-            <?php endif; ?>
+            <?php endforeach; ?>
         </div>
-    </div>
+    <?php endif; ?>
+</div>
+
+    <!-- HIGHEST PENALTY STUDENTS -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+    <h2 class="text-xl font-semibold text-gray-900 mb-5">Highest Penalty Students</h2>
+
+    <?php if (empty($penaltyStudents)): ?>
+        <p class="text-gray-500">No penalty data available.</p>
+    <?php else: ?>
+        <div class="max-h-[420px] overflow-y-auto pr-1 space-y-3">
+            <?php foreach ($penaltyStudents as $student): ?>
+                <div class="border rounded-xl p-4">
+                    <div class="flex justify-between items-start gap-4">
+                        <div>
+                            <h3 class="font-semibold text-gray-900"><?= e($student['student_name']) ?></h3>
+                            <p class="text-sm text-gray-500">Student ID: <?= e($student['student_id']) ?></p>
+                            <p class="text-sm text-gray-500"><?= e($student['course']) ?> • <?= e($student['yearlvl']) ?></p>
+                            <p class="text-sm text-gray-500 mt-3">
+                                Penalty Cases: <span class="font-medium text-gray-700"><?= e((int)$student['penalty_count']) ?></span>
+                            </p>
+                        </div>
+
+                        <div class="text-right min-w-[90px]">
+                            <p class="text-lg font-bold text-yellow-600">
+                                ₱<?= number_format((float)$student['total_penalty'], 2) ?>
+                            </p>
+                            <p class="text-xs text-gray-500">Total Penalty</p>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+</div>
+
+</div>
 
     <!-- LOWER GRID -->
     <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">

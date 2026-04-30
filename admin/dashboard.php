@@ -202,6 +202,8 @@ $availabilityPercent = $totalBooks > 0
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard</title>
   <link href="/library-management-system/assets/css/output.css" rel="stylesheet">
 </head>
@@ -210,13 +212,12 @@ $availabilityPercent = $totalBooks > 0
 <?php include 'header.php'; ?>
 
 <!-- ================= PAGE CONTENT ================= -->
-<div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
-
+ <div class="max-w-[1489px] mx-auto px-4 sm:px-6 pt-36 md:pt-40 pb-10">
 <div class="mb-6">
-    <h1 class="text-3xl font-bold text-gray-800">
+    <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">
         Admin Dashboard
     </h1>
-    <p class="text-gray-500 mt-1">
+    <p class="text-sm sm:text-base text-gray-500 mt-1">
         Overview of library operations
     </p>
 </div>

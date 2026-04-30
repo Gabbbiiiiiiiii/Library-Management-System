@@ -306,18 +306,27 @@ $books = $stmt->fetchAll();
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manage Books</title>
    <link href="/library-management-system/assets/css/output.css" rel="stylesheet">
+   <style>
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
 
-  
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+</style>
 </head>
 
 <body class="bg-gray-100">
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
-
+<div class="max-w-[1489px] mx-auto px-4 sm:px-6 pt-36 md:pt-40 pb-10">
 <?php if (!empty($_SESSION['success_message'])): ?>
     <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
         <?= e($_SESSION['success_message']) ?>
@@ -333,7 +342,7 @@ $books = $stmt->fetchAll();
 <?php endif; ?>
 
 <!-- TITLE + ADD BUTTON -->
-<div class="flex justify-between items-center mb-6">
+ <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
     <div>
         <h1 class="text-3xl font-bold text-gray-900">Manage Books</h1>
         <p class="text-gray-600">Add, edit, or remove books from the library</p>
@@ -341,20 +350,20 @@ $books = $stmt->fetchAll();
 
  <!-- Add Book button -->
 <button onclick="openModal('Add')"
-        class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">
+        class="w-full sm:w-auto bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700">
     + Add Book
 </button>
 </div>
 
 <!-- SEARCH -->
-<form method="GET" class="mb-6 flex gap-2">
+ <form method="GET" class="mb-6 flex flex-col sm:flex-row gap-2">
     <input type="text" name="search"
            value="<?= e($search) ?>"
            placeholder="Search by title, author, or ISBN..."
            class="w-full p-3 rounded-lg border focus:ring-2 focus:ring-purple-500">
 
     <button type="submit"
-            class="px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+            class="w-full sm:w-auto px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
         Search
     </button>
 </form>
@@ -375,80 +384,106 @@ $books = $stmt->fetchAll();
     </div>
 <?php else: ?>
     <?php foreach ($books as $book): ?>
-        <div class="bg-white p-4 rounded-xl shadow flex gap-4">
+        <div class="bg-white p-4 rounded-xl shadow flex flex-col sm:flex-row gap-4">
 
-            <img src="<?= e($book['coverImage'] ?: 'https://placehold.co/100x150?text=No+Cover') ?>"
-                 class="w-20 h-28 object-cover rounded"
-                 alt="Book Cover">
+    <img src="<?= e($book['coverImage'] ?: 'https://placehold.co/100x150?text=No+Cover') ?>"
+         class="w-24 h-32 sm:w-20 sm:h-28 object-cover rounded mx-auto sm:mx-0 shrink-0"
+         alt="Book Cover">
 
-            <div class="flex-1">
+    <div class="flex-1 min-w-0">
 
-                <div class="flex justify-between">
-                    <div>
-                        <h3 class="font-semibold text-lg"><?= e($book['title']) ?></h3>
-                        <p class="text-gray-600"><?= e($book['author']) ?></p>
-                    </div>
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div class="min-w-0">
+                <h3 class="font-semibold text-lg leading-snug break-words">
+                    <?= e($book['title']) ?>
+                </h3>
+                <p class="text-gray-600 break-words"><?= e($book['author']) ?></p>
+            </div>
 
-                    <span class="px-3 py-1 rounded-full text-xs font-medium <?= $book['availableCopies'] > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600' ?>">
-                        <?= $book['availableCopies'] > 0 ? 'Available' : 'Not Available' ?>
-                    </span>
-                </div>
+            <span class="self-start sm:self-auto inline-flex px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap <?= $book['availableCopies'] > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600' ?>">
+                <?= $book['availableCopies'] > 0 ? 'Available' : 'Not Available' ?>
+            </span>
+        </div>
 
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3">
-                    <div><strong>ISBN:</strong> <?= e($book['isbn']) ?></div>
-                    <div><strong>Category:</strong> <?= e($book['category']) ?></div>
-                    <div><strong>Publisher:</strong> <?= e($book['publisher']) ?></div>
-                    <div><strong>Year:</strong> <?= e($book['yearPublished']) ?></div>
-                    <div><strong>Total:</strong> <?= e($book['totalCopies']) ?></div>
-                    <div><strong>Available:</strong>
-                        <span class="text-green-600"><?= e($book['availableCopies']) ?></span>
-                    </div>
-                    <div><strong>Borrowed:</strong>
-                        <span class="text-blue-600">
-                            <?= e((string)($book['totalCopies'] - $book['availableCopies'])) ?>
-                        </span>
-                    </div>
-                </div>
-
-                <div class="mt-4 flex gap-2">
-                    <button onclick='editBook(<?= json_encode($book, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>)'
-                            class="border px-3 py-1 rounded hover:bg-gray-100">
-                        Edit
-                    </button>
-
-                    <form method="POST" onsubmit="return confirm('Delete this book?')" class="inline">
-                        <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
-                        <input type="hidden" name="delete_id" value="<?= e($book['id']) ?>">
-
-                        <button type="submit"
-                                class="border px-3 py-1 rounded hover:bg-red-100 text-red-600">
-                            Delete
-                        </button>
-                    </form>
-                </div>
-
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm mt-3">
+            <div class="break-words"><strong>ISBN:</strong> <?= e($book['isbn']) ?></div>
+            <div class="break-words"><strong>Category:</strong> <?= e($book['category']) ?></div>
+            <div class="break-words"><strong>Publisher:</strong> <?= e($book['publisher']) ?></div>
+            <div><strong>Year:</strong> <?= e($book['yearPublished']) ?></div>
+            <div><strong>Total:</strong> <?= e($book['totalCopies']) ?></div>
+            <div>
+                <strong>Available:</strong>
+                <span class="text-green-600"><?= e($book['availableCopies']) ?></span>
+            </div>
+            <div>
+                <strong>Borrowed:</strong>
+                <span class="text-blue-600">
+                    <?= e((string)($book['totalCopies'] - $book['availableCopies'])) ?>
+                </span>
             </div>
         </div>
+
+        <div class="mt-4 flex flex-col sm:flex-row gap-2">
+            <button onclick='editBook(<?= json_encode($book, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>)'
+                    class="w-full sm:w-auto border px-3 py-2 rounded hover:bg-gray-100">
+                Edit
+            </button>
+
+            <form method="POST" onsubmit="return confirm('Delete this book?')" class="w-full sm:w-auto">
+                <input type="hidden" name="token" value="<?= e($_SESSION['token']) ?>">
+                <input type="hidden" name="delete_id" value="<?= e($book['id']) ?>">
+
+                <button type="submit"
+                        class="w-full sm:w-auto border px-3 py-2 rounded hover:bg-red-100 text-red-600">
+                    Delete
+                </button>
+            </form>
+        </div>
+
+    </div>
+</div>
     <?php endforeach; ?>
 <?php endif; ?>
 </div>
 
-<div class="flex gap-2 mt-6">
+<?php if ($totalPages > 1): ?>
+    <div class="mt-8 flex justify-center">
+        <div class="flex items-center gap-2 max-w-full">
 
-<?php for ($i=1; $i <= $totalPages; $i++): ?>
+            <?php if ($totalPages > 5): ?>
+                <button type="button"
+                        id="scrollLeftBtn"
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold shadow-sm hover:-translate-y-0.5 hover:border-purple-300 hover:text-purple-600 hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm">
+                    &lt;
+                </button>
+            <?php endif; ?>
 
-<a href="?page=<?= $i ?>&search=<?= urlencode($search) ?>"
-class="px-3 py-1 border rounded
-<?= $i == $page ? 'bg-purple-600 text-white' : '' ?>">
+            <div id="paginationViewport" class="overflow-x-auto overflow-y-hidden max-w-[268px] scroll-smooth no-scrollbar">
+                <div id="paginationTrack" class="flex items-center gap-2 w-max">
+                    <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                        <a href="?page=<?= $i ?>&search=<?= urlencode($search) ?>"
+                           class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-sm font-semibold transition-all duration-200 ease-in-out
+                            <?= $i == $page
+                                ? 'bg-purple-600 text-white border-purple-600 shadow-md'
+                                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100 hover:text-purple-600 hover:-translate-y-0.5' ?>"
+                            >
+                            <?= $i ?>
+                        </a>
+                    <?php endfor; ?>
+                </div>
+            </div>
 
-<?= $i ?>
+            <?php if ($totalPages > 5): ?>
+                <button type="button"
+                        id="scrollRightBtn"
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold shadow-sm hover:-translate-y-0.5 hover:border-purple-300 hover:text-purple-600 hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm">
+                    &gt;
+                </button>
+            <?php endif; ?>
 
-</a>
-
-<?php endfor; ?>
-
-</div>
-
+        </div>
+    </div>
+<?php endif; ?>
 </div>
 <!-- ================= MODAL ================= -->
 <div id="bookModal" class="fixed inset-0 hidden z-50">
@@ -639,11 +674,8 @@ if (searchInput) {
         timeout = setTimeout(() => {
             if (this.value.trim() === '') {
                 window.location.href = 'manage_books.php';
-            } else {
-                window.location.href =
-                    'manage_books.php?search=' + encodeURIComponent(this.value);
             }
-        }, 500);
+        }, 300);
     });
 }
 
@@ -780,6 +812,54 @@ window.addEventListener('DOMContentLoaded', function () {
     openModal(<?= json_encode($modalMode) ?>);
 });
 <?php endif; ?>
+
+document.addEventListener('DOMContentLoaded', function () {
+    const viewport = document.getElementById('paginationViewport');
+    const track = document.getElementById('paginationTrack');
+    const leftBtn = document.getElementById('scrollLeftBtn');
+    const rightBtn = document.getElementById('scrollRightBtn');
+
+    if (viewport && track && leftBtn && rightBtn) {
+        const scrollAmount = 53 * 3;
+
+        function updateButtons() {
+            const maxScroll = track.scrollWidth - viewport.clientWidth;
+
+            leftBtn.disabled = viewport.scrollLeft <= 0;
+            rightBtn.disabled = viewport.scrollLeft >= maxScroll - 1;
+
+            leftBtn.classList.toggle('opacity-50', leftBtn.disabled);
+            leftBtn.classList.toggle('cursor-not-allowed', leftBtn.disabled);
+            rightBtn.classList.toggle('opacity-50', rightBtn.disabled);
+            rightBtn.classList.toggle('cursor-not-allowed', rightBtn.disabled);
+        }
+
+        leftBtn.addEventListener('click', function () {
+            viewport.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+        });
+
+        rightBtn.addEventListener('click', function () {
+            viewport.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+        });
+
+        viewport.addEventListener('scroll', updateButtons);
+        window.addEventListener('resize', updateButtons);
+
+        const activePage = track.querySelector('.bg-purple-600');
+        if (activePage) {
+            const targetLeft =
+                activePage.offsetLeft - (viewport.clientWidth / 2) + (activePage.clientWidth / 2);
+
+            viewport.scrollTo({
+                left: Math.max(0, targetLeft),
+                behavior: 'smooth'
+            });
+        }
+
+        updateButtons();
+    }
+});
+
 </script>
 
 </body>

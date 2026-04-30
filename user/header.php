@@ -80,32 +80,47 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Portal</title>
     <link href="/library-management-system/assets/css/output.css" rel="stylesheet">
+
+    <!-- Mobile App Icon -->
+<!-- <link rel="apple-touch-icon" href="/library-management-system/assets/images/mobile-logo.png">
+<link rel="manifest" href="/library-management-system/assets/app.webmanifest"> -->
+
+<!-- Theme color (top bar color) -->
+<!-- <meta name="theme-color" content="#1e3a8a"> -->
+
 </head>
 <body class="bg-gray-100">
 
 <header class="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50 shadow-sm">
-    <div class="max-w-[1489px] mx-auto px-6">
-        <div class="flex items-center justify-between h-20">
-            
-            <div class="flex items-center gap-4">
-                <img src="../assets/images/logo1.png" 
-                    alt="STI Logo" 
-                    class="h-12 w-auto object-contain">
-                <div>
-                    <h1 class="text-2xl font-bold text-slate-900 leading-tight">STI College Ormoc</h1>
-                    <p class="text-slate-500 text-sm">Library Management System</p>
+    <div class="max-w-[1489px] mx-auto px-4 sm:px-6">
+        <div class="flex items-center justify-between h-20 gap-3">
+
+            <!-- LEFT: LOGO -->
+            <div class="flex items-center gap-3 min-w-0">
+                <img src="/library-management-system/assets/images/logo1.png"
+                     alt="STI Logo"
+                     class="h-10 sm:h-12 w-auto object-contain shrink-0">
+
+                <div class="min-w-0">
+                    <h1 class="text-lg sm:text-2xl font-bold text-slate-900 leading-tight truncate">
+                        STI College Ormoc
+                    </h1>
+                    <p class="text-slate-500 text-xs sm:text-sm truncate">
+                        Library Management System
+                    </p>
                 </div>
             </div>
 
-            <div class="flex items-center gap-4">
+            <!-- RIGHT: ACTIONS -->
+            <div class="flex items-center gap-2 sm:gap-4 shrink-0">
 
-                <!-- Notification Bell -->
+                <!-- NOTIFICATIONS -->
                 <div class="relative">
                     <button id="notifBtn"
                             type="button"
-                            class="relative w-12 h-12 rounded-2xl border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 transition">
+                            class="relative w-11 h-11 sm:w-12 sm:h-12 rounded-2xl border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 transition">
                         <svg xmlns="http://www.w3.org/2000/svg"
-                             class="w-6 h-6 text-gray-700"
+                             class="w-5 h-5 sm:w-6 sm:h-6 text-gray-700"
                              fill="none"
                              viewBox="0 0 24 24"
                              stroke="currentColor">
@@ -114,45 +129,46 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
                         </svg>
 
                         <span id="notifBadge"
-                            class="<?= $totalNotifications > 0 ? '' : 'hidden' ?> absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-bold inline-flex items-center justify-center leading-none shadow">
+                              class="<?= $totalNotifications > 0 ? '' : 'hidden' ?> absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-bold inline-flex items-center justify-center leading-none shadow">
                             <?= $totalNotifications > 99 ? '99+' : $totalNotifications ?>
                         </span>
                     </button>
 
                     <div id="notifDropdown"
-     class="hidden absolute top-full mt-3 w-[380px] sm:w-[420px] bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden z-50"
-     style="right: -330px;">
-                        <!-- class="hidden absolute right-0 mt-3 w-[380px] sm:w-[420px] bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden z-50"> -->
-                        
-                        <div class="flex items-center justify-between gap-3 px-4 py-3 border-b bg-gray-50">
-                            <h3 class="font-semibold text-slate-900 text-base whitespace-nowrap">Notifications</h3>
+                    class="hidden fixed top-[5.5rem] left-2 right-2 w-auto sm:absolute sm:top-full sm:mt-3 sm:right-auto sm:left-0 sm:w-[335px] bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden z-50">
 
-                            <button id="markAllReadBtn"
-                                    type="button"
-                                    class="text-sm font-medium text-blue-600 hover:text-blue-700 text-right leading-tight shrink-0">
-                                Mark all as read
-                            </button>
+                    <div class="px-4 py-3 border-b bg-gray-50">
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <h3 class="font-semibold text-slate-900 text-base">Notifications</h3>
 
-                            <button id="deleteAllBtn"
-                                class="text-sm font-medium text-red-600 hover:text-red-700">
-                                Clear
-                            </button>
+                        <div class="flex items-center gap-3 flex-wrap">
+                                <button id="markAllReadBtn"
+                                        type="button"
+                                        class="text-sm font-medium text-blue-600 hover:text-blue-700 leading-tight">
+                                    Mark all as read
+                                </button>
 
-                        </div>
-
-                        <div id="notifList" class="max-h-[420px] overflow-y-auto">
-                            <div class="p-4 text-sm text-gray-500">Loading notifications...</div>
+                                <button id="deleteAllBtn"
+                                        type="button"
+                                        class="ml-auto sm:ml-0 text-sm font-medium text-red-600 hover:text-red-700 leading-tight">
+                                    Clear
+                                </button>
+                            </div>
                         </div>
                     </div>
+
+        <div id="notifList" class="max-h-[60vh] sm:max-h-[420px] overflow-y-auto">
+            <div class="p-4 text-sm text-gray-500">Loading notifications...</div>
+        </div>
+</div>
                 </div>
 
-                <!-- Student Info -->
-               <div class="relative">
+                <!-- PROFILE -->
+                <div class="relative hidden sm:block">
                     <button id="profileDropdownBtn"
-                        type="button"
-                        class="bg-gray-100 rounded-2xl px-4 py-3 flex items-center gap-3 hover:bg-gray-200 transition min-w-[270px]">
-                        
-                        <div class="w-11 h-11 rounded-full overflow-hidden bg-slate-200 border border-slate-300 shrink-0 flex items-center justify-center">
+                            type="button"
+                            class="bg-gray-100 rounded-2xl px-3 sm:px-4 py-3 flex items-center gap-3 hover:bg-gray-200 transition min-w-[220px] lg:min-w-[270px] max-w-[300px]">
+                        <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-full overflow-hidden bg-slate-200 border border-slate-300 shrink-0 flex items-center justify-center">
                             <?php if (!empty($studentProfileImage)): ?>
                                 <img src="<?= e($studentProfileImage) ?>" alt="Profile" class="w-full h-full object-cover">
                             <?php else: ?>
@@ -168,72 +184,196 @@ $totalNotifications = countUnreadStudentNotifications($pdo, $userId, $studentId,
                         </div>
 
                         <svg xmlns="http://www.w3.org/2000/svg"
-                            class="w-5 h-5 text-slate-500 shrink-0"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor">
+                             class="w-5 h-5 text-slate-500 shrink-0"
+                             fill="none"
+                             viewBox="0 0 24 24"
+                             stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
                         </svg>
                     </button>
 
-                    <div id="profileDropdownMenu"
-                        class="hidden absolute right-0 mt-3 w-52 bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden z-50">
-                        <a href="profile.php"
-                        class="block px-4 py-3 text-sm text-slate-700 hover:bg-gray-50">
-                            My Profile
-                        </a>
-                        <a href="../auth/logout.php"
-                        class="block px-4 py-3 text-sm text-red-600 hover:bg-red-50">
-                            <span></span> Logout
-                        </a>
-                    </div>
+                    <!-- Dropdown -->
+                <div id="profileDropdownMenu"
+                    class="hidden absolute right-0 top-full mt-2 w-56 bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden z-50">
+
+                    <a href="profile.php"
+                    class="flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-gray-50 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg"
+                            class="w-5 h-5 text-slate-500"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15.75 6.75a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.118a7.5 7.5 0 0 1 15 0A17.933 17.933 0 0 1 12 21.75a17.933 17.933 0 0 1-7.5-1.632Z" />
+                        </svg>
+                        <span>My Profile</span>
+                    </a>
+
+                    <div class="border-t border-gray-100"></div>
+
+                    <a href="../auth/logout.php"
+                    class="flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg"
+                            class="w-5 h-5 text-red-500"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6A2.25 2.25 0 0 0 5.25 5.25v13.5A2.25 2.25 0 0 0 7.5 21h6A2.25 2.25 0 0 0 15.75 18.75V15m3 0 3-3m0 0-3-3m3 3H9" />
+                        </svg>
+                        <span>Logout</span>
+                    </a>
+                </div>
                 </div>
 
-                <!-- Logout -->
-                <!-- <a href="../auth/logout.php"
-                   class="border border-gray-300 rounded-2xl px-6 py-3 font-semibold text-slate-900 hover:bg-gray-50">
-                    <span>↩</span> Logout
-                </a> -->
+                <!-- MOBILE MENU BUTTON -->
+               <button
+                    id="mobileMenuBtn"
+                    type="button"
+                    class="menu-toggle inline-flex sm:hidden"
+                    aria-label="Open menu"
+                    aria-expanded="false"
+                >
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- ================= NAVIGATION ================= -->
-    <div class="border-t bg-gray-50">
+    <!-- DESKTOP NAV -->
+    <div class="hidden sm:block border-t bg-gray-50">
         <div class="max-w-[1489px] mx-auto px-6">
-            <nav class="flex gap-8 text-sm font-medium">
+            <nav class="flex gap-8 text-sm font-medium overflow-x-auto">
                 <a href="student_dashboard.php"
-                   class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'student_dashboard' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
+                   class="pb-3 pt-3 font-medium border-b-2 whitespace-nowrap <?= $currentPage === 'student_dashboard' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
                     Dashboard
                 </a>
 
                 <a href="book_catalog.php"
-                   class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'book_catalog' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
+                   class="pb-3 pt-3 font-medium border-b-2 whitespace-nowrap <?= $currentPage === 'book_catalog' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
                     Book Catalog
                 </a>
 
                 <a href="my_borrowings.php"
-                   class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'my_borrowings' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
+                   class="pb-3 pt-3 font-medium border-b-2 whitespace-nowrap <?= $currentPage === 'my_borrowings' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
                     My Borrowings
                 </a>
 
                 <a href="reservations.php"
-                   class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'reservations' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
+                   class="pb-3 pt-3 font-medium border-b-2 whitespace-nowrap <?= $currentPage === 'reservations' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
                     Reservations
                 </a>
-
+<!-- 
                 <a href="profile.php"
-                class="pb-3 pt-3 font-medium border-b-2 <?= $currentPage === 'profile' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
+                   class="pb-3 pt-3 font-medium border-b-2 whitespace-nowrap <?= $currentPage === 'profile' ? 'text-blue-600 border-blue-600' : 'text-gray-700 border-transparent hover:text-blue-600' ?>">
                     Profile
-                </a>
-
+                </a> -->
             </nav>
+        </div>
+    </div>
+
+    <!-- MOBILE MENU -->
+    <div id="mobileMenu"
+         class="hidden sm:hidden border-t bg-white shadow-sm">
+        <div class="px-4 py-4 space-y-2">
+           <a href="profile.php" class="block">
+                <div class="flex items-center gap-3 rounded-2xl bg-gray-100 px-3 py-3 hover:bg-gray-200 transition cursor-pointer">
+                    <div class="w-10 h-10 rounded-full overflow-hidden bg-slate-200 border border-slate-300 shrink-0 flex items-center justify-center">
+                        <?php if (!empty($studentProfileImage)): ?>
+                            <img src="<?= e($studentProfileImage) ?>" alt="Profile" class="w-full h-full object-cover">
+                        <?php else: ?>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-slate-500" viewBox="0 0 24 24" fill="currentColor">
+                                <path fill-rule="evenodd" d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.437-.695Z" clip-rule="evenodd" />
+                            </svg>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="min-w-0">
+                        <p class="font-semibold text-slate-900 truncate"><?= e($studentName) ?></p>
+                        <p class="text-sm text-slate-500 truncate"><?= e($studentId) ?></p>
+                    </div>
+                </div>
+            </a>
+
+            <a href="student_dashboard.php"
+               class="block rounded-xl px-4 py-3 text-sm font-medium <?= $currentPage === 'student_dashboard' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-gray-50' ?>">
+                Dashboard
+            </a>
+
+            <a href="book_catalog.php"
+               class="block rounded-xl px-4 py-3 text-sm font-medium <?= $currentPage === 'book_catalog' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-gray-50' ?>">
+                Book Catalog
+            </a>
+
+            <a href="my_borrowings.php"
+               class="block rounded-xl px-4 py-3 text-sm font-medium <?= $currentPage === 'my_borrowings' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-gray-50' ?>">
+                My Borrowings
+            </a>
+
+            <a href="reservations.php"
+               class="block rounded-xl px-4 py-3 text-sm font-medium <?= $currentPage === 'reservations' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-gray-50' ?>">
+                Reservations
+            </a>
+
+            <!-- <a href="profile.php"
+               class="block rounded-xl px-4 py-3 text-sm font-medium <?= $currentPage === 'profile' ? 'bg-blue-50 text-blue-600' : 'text-slate-700 hover:bg-gray-50' ?>">
+                Profile
+            </a> -->
+
+            <a href="../auth/logout.php"
+               class="block rounded-xl px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50">
+                Logout
+            </a>
         </div>
     </div>
 </header>
 
+<style>
+    .menu-toggle {
+        width: 52px;
+        height: 52px;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        background: #ffffff;
+        cursor: pointer;
+        padding: 0;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 6px;
+        transition: all 0.3s ease;
+    }
+
+    .menu-toggle:hover {
+        background: #f9fafb;
+    }
+
+    .menu-toggle span {
+        display: block;
+        width: 22px;
+        height: 2.5px;
+        background: #374151;
+        border-radius: 999px;
+        transition: all 0.3s ease;
+    }
+
+    .menu-toggle.active span:nth-child(1) {
+        transform: translateY(8px) rotate(45deg);
+    }
+
+    .menu-toggle.active span:nth-child(2) {
+        opacity: 0;
+    }
+
+    .menu-toggle.active span:nth-child(3) {
+        transform: translateY(-8px) rotate(-45deg);
+    }
+</style>
+
 <audio id="notifSound" preload="auto">
-    <source src="/library-management-system/assets/notification.mp3" type="audio/mpeg">
+    <source src="../assets/notification.mp3" type="audio/mpeg">
 </audio>
 
 <script>
@@ -244,6 +384,10 @@ const notifBadge = document.getElementById('notifBadge');
 const markAllReadBtn = document.getElementById('markAllReadBtn');
 const notifSound = document.getElementById('notifSound');
 const deleteAllBtn = document.getElementById('deleteAllBtn');
+const profileDropdownBtn = document.getElementById('profileDropdownBtn');
+const profileDropdownMenu = document.getElementById('profileDropdownMenu');
+const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+const mobileMenu = document.getElementById('mobileMenu');
 
 let lastUnreadCount = <?= (int)$totalNotifications ?>;
 
@@ -321,12 +465,10 @@ function renderNotifications(data) {
             <div id="notif-item-${Number(item.id)}"
                 class="notif-item group flex items-start justify-between gap-3 px-4 py-4 border-b last:border-b-0 hover:bg-gray-50 transition ${bg}">
                 
-                <!-- LEFT CONTENT -->
                 <a href="${escapeHtml(link)}"
-                class="flex-1 min-w-0"
-                onclick="markSingleNotificationRead(${Number(item.id)})">
+                   class="flex-1 min-w-0"
+                   onclick="markSingleNotificationRead(${Number(item.id)})">
 
-                    <!-- 🔥 ICON + TITLE -->
                     <div class="flex items-center gap-2">
                         <span class="${iconClass} text-xs font-bold">•</span>
                         <p class="font-semibold text-slate-900 text-[15px] leading-6">
@@ -343,18 +485,15 @@ function renderNotifications(data) {
                     </p>
                 </a>
 
-                <!-- RIGHT SIDE -->
                 <div class="flex items-center gap-2 shrink-0">
-
                     ${Number(item.is_read) === 0 ? `
                         <span class="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
                     ` : ''}
 
                     <button onclick="deleteNotification(${Number(item.id)})"
-                        class="opacity-0 group-hover:opacity-100 transition duration-200 text-gray-400 hover:text-red-500 text-sm leading-none">
+                            class="opacity-0 group-hover:opacity-100 transition duration-200 text-gray-400 hover:text-red-500 text-sm leading-none">
                         ✕
                     </button>
-
                 </div>
             </div>
         `;
@@ -381,9 +520,7 @@ async function markSingleNotificationRead(id) {
     try {
         await fetch('mark_notifications_read.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
     } catch (error) {
@@ -395,9 +532,7 @@ async function markAllNotificationsRead() {
     try {
         await fetch('mark_notifications_read.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
         });
 
@@ -407,8 +542,12 @@ async function markAllNotificationsRead() {
     }
 }
 
-notifBtn?.addEventListener('click', async function () {
+notifBtn?.addEventListener('click', async function (e) {
+    e.stopPropagation();
     notifDropdown.classList.toggle('hidden');
+    profileDropdownMenu?.classList.add('hidden');
+    mobileMenu?.classList.add('hidden');
+
     if (!notifDropdown.classList.contains('hidden')) {
         await fetchNotifications();
     }
@@ -418,15 +557,6 @@ markAllReadBtn?.addEventListener('click', async function (e) {
     e.preventDefault();
     await markAllNotificationsRead();
 });
-
-document.addEventListener('click', function (e) {
-    if (!notifBtn?.contains(e.target) && !notifDropdown?.contains(e.target)) {
-        notifDropdown?.classList.add('hidden');
-    }
-});
-
-fetchNotifications();
-setInterval(fetchNotifications, 10000);
 
 deleteAllBtn?.addEventListener('click', async function () {
     if (!confirm('Clear all notifications? This cannot be undone.')) return;
@@ -438,10 +568,7 @@ deleteAllBtn?.addEventListener('click', async function () {
             return animateRemoveNotification(id);
         }));
 
-        await fetch('delete_notifications.php', {
-            method: 'POST'
-        });
-
+        await fetch('delete_notifications.php', { method: 'POST' });
         await fetchNotifications();
     } catch (error) {
         console.error('Clear notifications failed:', error);
@@ -485,9 +612,7 @@ async function deleteNotification(id) {
 
         await fetch('delete_notifications.php', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id })
         });
 
@@ -498,18 +623,41 @@ async function deleteNotification(id) {
     }
 }
 
-const profileDropdownBtn = document.getElementById('profileDropdownBtn');
-const profileDropdownMenu = document.getElementById('profileDropdownMenu');
-
 profileDropdownBtn?.addEventListener('click', function (e) {
     e.stopPropagation();
     profileDropdownMenu?.classList.toggle('hidden');
+    notifDropdown?.classList.add('hidden');
+    mobileMenu?.classList.add('hidden');
+});
+
+mobileMenuBtn?.addEventListener('click', function (e) {
+    e.stopPropagation();
+
+    mobileMenu?.classList.toggle('hidden');
+    notifDropdown?.classList.add('hidden');
+    profileDropdownMenu?.classList.add('hidden');
+    mobileMenuBtn.classList.toggle('active');
+
+    const expanded = mobileMenuBtn.classList.contains('active');
+    mobileMenuBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 });
 
 document.addEventListener('click', function (e) {
+    if (!notifBtn?.contains(e.target) && !notifDropdown?.contains(e.target)) {
+        notifDropdown?.classList.add('hidden');
+    }
+
     if (!profileDropdownBtn?.contains(e.target) && !profileDropdownMenu?.contains(e.target)) {
         profileDropdownMenu?.classList.add('hidden');
     }
+
+   if (!mobileMenuBtn?.contains(e.target) && !mobileMenu?.contains(e.target)) {
+    mobileMenu?.classList.add('hidden');
+    mobileMenuBtn?.classList.remove('active');
+    mobileMenuBtn?.setAttribute('aria-expanded', 'false');
+    }
 });
 
+fetchNotifications();
+setInterval(fetchNotifications, 10000);
 </script>

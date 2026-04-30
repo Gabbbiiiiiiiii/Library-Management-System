@@ -347,6 +347,22 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $borrowings = $stmt->fetchAll();
 
+/* ================= PAGINATION ================= */
+$perPage = 10;
+$page = max(1, (int)($_GET['page'] ?? 1));
+$totalBorrowings = count($borrowings);
+$totalPages = (int) ceil($totalBorrowings / $perPage);
+
+if ($totalPages < 1) {
+    $totalPages = 1;
+}
+
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+
+$borrowingsPaginated = array_slice($borrowings, ($page - 1) * $perPage, $perPage);
+
 $successMessage = $_SESSION['success_message'] ?? '';
 unset($_SESSION['success_message']);
 ?>
@@ -357,13 +373,22 @@ unset($_SESSION['success_message']);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Process Returns</title>
     <link href="/library-management-system/assets/css/output.css" rel="stylesheet">
+    <style>
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .no-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+</style>
 </head>
 <body class="bg-gray-100">
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-[1489px] mx-auto px-6 pt-28 pb-10">
-
+<div class="max-w-[1489px] mx-auto px-4 sm:px-6 pt-36 md:pt-40 pb-10">
     <!-- HEADER -->
     <div class="mb-8">
         <h1 class="text-3xl font-bold text-gray-900">Process Returns</h1>
@@ -413,7 +438,7 @@ unset($_SESSION['success_message']);
             </div>
         <?php else: ?>
 
-            <?php foreach ($borrowings as $row): ?>
+            <?php foreach ($borrowingsPaginated as $row): ?>
                 <?php
                     $studentName = $row['studentName'] ?: ($row['user_fullname'] ?: 'Unknown Student');
                     $studentId   = $row['student_id'] ?: ($row['user_student_id'] ?: '—');
@@ -581,6 +606,47 @@ unset($_SESSION['success_message']);
                 </div>
 
             <?php endforeach; ?>
+            <?php
+                $paginationBaseUrl = '?search=' . urlencode($search);
+                ?>
+
+                <?php if ($totalBorrowings > $perPage): ?>
+    <div class="mt-8 flex justify-center">
+        <div class="flex items-center gap-2 max-w-full">
+
+            <?php if ($totalPages > 5): ?>
+                <button type="button"
+                        id="scrollLeftBtn"
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold shadow-sm hover:-translate-y-0.5 hover:border-purple-300 hover:text-purple-600 hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm">
+                    &lt;
+                </button>
+            <?php endif; ?>
+
+            <div id="paginationViewport" class="overflow-x-auto overflow-y-hidden max-w-[268px] scroll-smooth no-scrollbar">
+                <div id="paginationTrack" class="flex items-center gap-2 w-max">
+                    <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                        <a href="<?= e($paginationBaseUrl . '&page=' . $i) ?>"
+                           class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border text-sm font-semibold transition
+                           <?= $i === $page
+                                ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                                : 'bg-white text-gray-700 border-gray-300 hover:border-purple-300 hover:text-purple-600' ?>">
+                            <?= $i ?>
+                        </a>
+                    <?php endfor; ?>
+                </div>
+            </div>
+
+            <?php if ($totalPages > 5): ?>
+                <button type="button"
+                        id="scrollRightBtn"
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold shadow-sm hover:-translate-y-0.5 hover:border-purple-300 hover:text-purple-600 hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm">
+                    &gt;
+                </button>
+            <?php endif; ?>
+
+        </div>
+    </div>
+<?php endif; ?>
         <?php endif; ?>
     </div>
 </div>
@@ -613,6 +679,53 @@ if (searchInput) {
         }
     });
 }
+
+document.addEventListener('DOMContentLoaded', function () {
+    const viewport = document.getElementById('paginationViewport');
+    const track = document.getElementById('paginationTrack');
+    const leftBtn = document.getElementById('scrollLeftBtn');
+    const rightBtn = document.getElementById('scrollRightBtn');
+
+    if (viewport && track && leftBtn && rightBtn) {
+        const scrollAmount = 53 * 3;
+
+        function updateButtons() {
+            const maxScroll = track.scrollWidth - viewport.clientWidth;
+
+            leftBtn.disabled = viewport.scrollLeft <= 0;
+            rightBtn.disabled = viewport.scrollLeft >= maxScroll - 1;
+
+            leftBtn.classList.toggle('opacity-50', leftBtn.disabled);
+            leftBtn.classList.toggle('cursor-not-allowed', leftBtn.disabled);
+            rightBtn.classList.toggle('opacity-50', rightBtn.disabled);
+            rightBtn.classList.toggle('cursor-not-allowed', rightBtn.disabled);
+        }
+
+        leftBtn.addEventListener('click', function () {
+            viewport.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+        });
+
+        rightBtn.addEventListener('click', function () {
+            viewport.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+        });
+
+        viewport.addEventListener('scroll', updateButtons);
+        window.addEventListener('resize', updateButtons);
+
+        const activePage = track.querySelector('.bg-purple-600');
+        if (activePage) {
+            const targetLeft =
+                activePage.offsetLeft - (viewport.clientWidth / 2) + (activePage.clientWidth / 2);
+
+            viewport.scrollTo({
+                left: Math.max(0, targetLeft),
+                behavior: 'smooth'
+            });
+        }
+
+        updateButtons();
+    }
+});
 </script>
 
 </body>

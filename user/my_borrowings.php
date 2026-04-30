@@ -121,6 +121,24 @@ $returnedBorrowings = array_values(array_filter($allBorrowings, function ($row) 
 usort($returnedBorrowings, function ($a, $b) {
     return strtotime($b['returnDate'] ?? '1970-01-01') <=> strtotime($a['returnDate'] ?? '1970-01-01');
 });
+
+/* ================= HISTORY PAGINATION ================= */
+$perPage = 10;
+$historyPage = max(1, (int)($_GET['history_page'] ?? 1));
+
+$totalHistoryItems = count($returnedBorrowings);
+$totalHistoryPages = max(1, (int)ceil($totalHistoryItems / $perPage));
+
+
+if ($historyPage > $totalHistoryPages) {
+    $historyPage = $totalHistoryPages;
+}
+
+$returnedBorrowingsPaginated = array_slice(
+    $returnedBorrowings,
+    ($historyPage - 1) * $perPage,
+    $perPage
+);
 ?>
 
 <?php include 'header.php'; ?>
@@ -235,7 +253,7 @@ usort($returnedBorrowings, function ($a, $b) {
                     <p class="text-gray-600 mt-2">Your borrowing history will appear here once you return books.</p>
                 </div>
             <?php else: ?>
-                <?php foreach ($returnedBorrowings as $row): ?>
+                <?php foreach ($returnedBorrowingsPaginated as $row): ?>
                     <?php
                         $cover = !empty($row['coverImage'])
                             ? '/library-management-system/admin/' . ltrim($row['coverImage'], '/')
@@ -295,6 +313,45 @@ usort($returnedBorrowings, function ($a, $b) {
                         </div>
                     </div>
                 <?php endforeach; ?>
+                <?php if ($totalHistoryItems > $perPage): ?>
+    <div class="mt-8 flex justify-center">
+        <div class="flex items-center gap-2 max-w-full">
+
+            <?php if ($totalHistoryPages > 5): ?>
+                <button type="button"
+                        id="scrollLeftBtn"
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold shadow-sm hover:-translate-y-1 hover:border-blue-300 hover:text-blue-600 hover:shadow-md transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm">
+                    &lt;
+                </button>
+            <?php endif; ?>
+
+            <div id="paginationViewport" class="overflow-x-auto overflow-y-hidden max-w-[268px] scroll-smooth no-scrollbar">
+                <div id="paginationTrack" class="flex items-center gap-2 w-max">
+                    <?php for ($i = 1; $i <= $totalHistoryPages; $i++): ?>
+                        <?php
+                        $pageClasses = $i === $historyPage
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300';
+                        ?>
+                        <a href="?tab=history&history_page=<?= $i ?>"
+                           class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-sm font-semibold transition-all duration-200 ease-in-out <?= $pageClasses ?>">
+                            <?= $i ?>
+                        </a>
+                    <?php endfor; ?>
+                </div>
+            </div>
+
+            <?php if ($totalHistoryPages > 5): ?>
+                <button type="button"
+                        id="scrollRightBtn"
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-300 bg-white text-gray-700 text-sm font-semibold shadow-sm hover:-translate-y-1 hover:border-blue-300 hover:text-blue-600 hover:shadow-md transition-all duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm">
+                    &gt;
+                </button>
+            <?php endif; ?>
+
+        </div>
+    </div>
+<?php endif; ?>
             <?php endif; ?>
         </section>
     <?php endif; ?>
@@ -317,6 +374,65 @@ usort($returnedBorrowings, function ($a, $b) {
     </section>
 
 </main>
+
+<style>
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const viewport = document.getElementById('paginationViewport');
+    const track = document.getElementById('paginationTrack');
+    const leftBtn = document.getElementById('scrollLeftBtn');
+    const rightBtn = document.getElementById('scrollRightBtn');
+
+    if (!viewport || !track || !leftBtn || !rightBtn) return;
+
+    const scrollAmount = 53 * 3;
+
+    function updateButtons() {
+        const maxScroll = track.scrollWidth - viewport.clientWidth;
+
+        leftBtn.disabled = viewport.scrollLeft <= 0;
+        rightBtn.disabled = viewport.scrollLeft >= maxScroll - 1;
+
+        leftBtn.classList.toggle('opacity-50', leftBtn.disabled);
+        leftBtn.classList.toggle('cursor-not-allowed', leftBtn.disabled);
+        rightBtn.classList.toggle('opacity-50', rightBtn.disabled);
+        rightBtn.classList.toggle('cursor-not-allowed', rightBtn.disabled);
+    }
+
+    leftBtn.addEventListener('click', function () {
+        viewport.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+    });
+
+    rightBtn.addEventListener('click', function () {
+        viewport.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    });
+
+    viewport.addEventListener('scroll', updateButtons);
+    window.addEventListener('resize', updateButtons);
+
+    const activePage = track.querySelector('.bg-blue-600');
+    if (activePage) {
+        const targetLeft =
+            activePage.offsetLeft - (viewport.clientWidth / 2) + (activePage.clientWidth / 2);
+
+        viewport.scrollTo({
+            left: Math.max(0, targetLeft),
+            behavior: 'smooth'
+        });
+    }
+
+    updateButtons();
+});
+</script>
 
 </body>
 </html>

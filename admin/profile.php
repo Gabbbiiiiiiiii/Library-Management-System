@@ -1,417 +1,471 @@
 <?php
-session_start();
 $currentPage = 'profile';
-require_once __DIR__ . "/../config/database.php";
 
-// =========================
-// AUTH CHECK
-// =========================
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once __DIR__ . '/../includes/library_helpers.php';
+
+if (!function_exists('e')) {
+    function e($value) {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
+}
+
+/* ================= AUTH CHECK ================= */
+if (!isset($_SESSION['user_id'], $_SESSION['role']) || $_SESSION['role'] !== 'admin') {
     header("Location: index.php");
     exit();
 }
 
-// session timeout
+/* ================= SESSION TIMEOUT ================= */
 if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > 900) {
-    session_unset();
     session_destroy();
     header("Location: index.php?expired=1");
     exit();
 }
+
 $_SESSION['last_activity'] = time();
 
-// =========================
-// HELPER
-// =========================
-function e($value)
-{
-    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
-}
+/* ================= DATABASE ================= */
+try {
+    $pdo = new PDO(
+        "mysql:host=localhost;dbname=sti_library;charset=utf8mb4",
+        "root",
+        "",
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+        ]
+    );
 
-// =========================
-// GET ADMIN DATA
-// =========================
-$adminId = (int) $_SESSION['user_id'];
-
-$stmt = $conn->prepare("SELECT * FROM users WHERE id = ? AND role = 'admin' LIMIT 1");
-$stmt->bind_param("i", $adminId);
-$stmt->execute();
-$result = $stmt->get_result();
-$admin = $result->fetch_assoc();
-$stmt->close();
-
-if (!$admin) {
-    die("Admin account not found.");
-}
-
-// =========================
-// FLASH MESSAGES
-// =========================
-$profile_success = $_SESSION['profile_success'] ?? '';
-$profile_error = $_SESSION['profile_error'] ?? '';
-
-$password_success = $_SESSION['password_success'] ?? '';
-$password_error = $_SESSION['password_error'] ?? '';
-
-unset($_SESSION['profile_success'], $_SESSION['profile_error']);
-unset($_SESSION['password_success'], $_SESSION['password_error']);
-
-// =========================
-// UPDATE PROFILE INFO (EMAIL)
-// =========================
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
-    $fullname = trim($_POST['fullname'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-
-    if ($fullname === '' || $email === '') {
-        $_SESSION['profile_error'] = "Full name and email are required.";
-    } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $_SESSION['profile_error'] = "Please enter a valid email address.";
-    } else {
-        $checkStmt = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1");
-        $checkStmt->bind_param("si", $email, $adminId);
-        $checkStmt->execute();
-        $checkResult = $checkStmt->get_result();
-        $emailExists = $checkResult->fetch_assoc();
-        $checkStmt->close();
-
-        if ($emailExists) {
-            $_SESSION['profile_error'] = "That email is already being used by another account.";
-        } else {
-            $updateStmt = $conn->prepare("
-                UPDATE users
-                SET fullname = ?, email = ?
-                WHERE id = ? AND role = 'admin'
-            ");
-            $updateStmt->bind_param("ssi", $fullname, $email, $adminId);
-
-            if ($updateStmt->execute()) {
-                $_SESSION['profile_success'] = "Profile updated successfully.";
-            } else {
-                $_SESSION['profile_error'] = "Failed to update profile.";
-            }
-
-            $updateStmt->close();
-        }
+    if (function_exists('setLibraryDbTimezone')) {
+        setLibraryDbTimezone($pdo);
     }
+} catch (PDOException $e) {
+    die("Database error.");
+}
 
-    header("Location: profile.php");
+$success = $_SESSION['success_message'] ?? '';
+$error = $_SESSION['error_message'] ?? '';
+
+unset($_SESSION['success_message'], $_SESSION['error_message']);
+
+$adminId = $_SESSION['user_id'] ?? null;
+
+if (!$adminId) {
+    header("Location: index.php");
     exit();
 }
 
-// =========================
-// CHANGE PASSWORD (PRG)
-// =========================
+/* ================= FETCH ADMIN ================= */
+try {
+    $stmt = $pdo->prepare("
+        SELECT id, fullname, email, role, created_at, profile_image, cover_image, password
+        FROM users
+        WHERE id = ? AND role = 'admin'
+        LIMIT 1
+    ");
+    $stmt->execute([$adminId]);
+    $admin = $stmt->fetch();
+
+    if (!$admin) {
+        die("Admin account not found.");
+    }
+} catch (PDOException $e) {
+    die("Database error.");
+}
+
+/* ================= PROFILE IMAGE UPLOAD ================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_profile_image'])) {
+    if (!empty($_FILES['profile_image']['name'])) {
+        $uploadDir = __DIR__ . '/../uploads/profile_images/';
+
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0777, true);
+        }
+
+        $fileName = $_FILES['profile_image']['name'];
+        $tmpName = $_FILES['profile_image']['tmp_name'];
+        $fileSize = $_FILES['profile_image']['size'];
+
+        $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+        $allowedExt = ['jpg', 'jpeg', 'png', 'webp'];
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $tmpName);
+        finfo_close($finfo);
+
+        $allowedMime = ['image/jpeg', 'image/png', 'image/webp'];
+
+        if (!in_array($ext, $allowedExt)) {
+            $error = "Only JPG, JPEG, PNG, and WEBP files are allowed.";
+        } elseif (!in_array($mime, $allowedMime)) {
+            $error = "Invalid image file type.";
+        } elseif ($fileSize > 2 * 1024 * 1024) {
+            $error = "Profile image size must not exceed 2MB.";
+        } else {
+            $newFileName = 'admin_profile_' . $adminId . '_' . time() . '.' . $ext;
+            $targetPath = $uploadDir . $newFileName;
+
+            if (move_uploaded_file($tmpName, $targetPath)) {
+                $stmt = $pdo->prepare("
+                    UPDATE users 
+                    SET profile_image = ? 
+                    WHERE id = ? AND role = 'admin'
+                ");
+                $stmt->execute([$newFileName, $adminId]);
+
+                $_SESSION['profile_image'] = $newFileName;
+                $_SESSION['success_message'] = "Profile image updated successfully.";
+
+                header("Location: /library-management-system/admin/profile.php");
+                exit();
+            } else {
+                $error = "Failed to upload profile image.";
+            }
+        }
+    } else {
+        $error = "Please select a profile image.";
+    }
+}
+
+/* ================= COVER IMAGE UPLOAD ================= */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_cover_image'])) {
+    if (!empty($_FILES['cover_image']['name'])) {
+        $uploadDir = __DIR__ . '/../uploads/cover_images/';
+
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0777, true);
+        }
+
+        $fileName = $_FILES['cover_image']['name'];
+        $tmpName = $_FILES['cover_image']['tmp_name'];
+        $fileSize = $_FILES['cover_image']['size'];
+
+        $ext = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+        $allowedExt = ['jpg', 'jpeg', 'png', 'webp'];
+
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $tmpName);
+        finfo_close($finfo);
+
+        $allowedMime = ['image/jpeg', 'image/png', 'image/webp'];
+
+        if (!in_array($ext, $allowedExt)) {
+            $error = "Only JPG, JPEG, PNG, and WEBP files are allowed.";
+        } elseif (!in_array($mime, $allowedMime)) {
+            $error = "Invalid image file type.";
+        } elseif ($fileSize > 4 * 1024 * 1024) {
+            $error = "Cover image size must not exceed 4MB.";
+        } else {
+            $newFileName = 'admin_cover_' . $adminId . '_' . time() . '.' . $ext;
+            $targetPath = $uploadDir . $newFileName;
+
+            if (move_uploaded_file($tmpName, $targetPath)) {
+                $stmt = $pdo->prepare("
+                    UPDATE users 
+                    SET cover_image = ? 
+                    WHERE id = ? AND role = 'admin'
+                ");
+                $stmt->execute([$newFileName, $adminId]);
+
+                $_SESSION['cover_image'] = $newFileName;
+                $_SESSION['success_message'] = "Cover image updated successfully.";
+
+                header("Location: /library-management-system/admin/profile.php");
+                exit();
+            } else {
+                $error = "Failed to upload cover image.";
+            }
+        }
+    } else {
+        $error = "Please select a cover image.";
+    }
+}
+
+/* ================= CHANGE PASSWORD ================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
-    $currentPassword = trim($_POST['current_password'] ?? '');
-    $newPassword = trim($_POST['new_password'] ?? '');
-    $confirmPassword = trim($_POST['confirm_password'] ?? '');
+    $currentPassword = $_POST['current_password'] ?? '';
+    $newPassword = $_POST['new_password'] ?? '';
+    $confirmPassword = $_POST['confirm_password'] ?? '';
 
     if ($currentPassword === '' || $newPassword === '' || $confirmPassword === '') {
-        $_SESSION['password_error'] = "All password fields are required.";
+        $error = "All password fields are required.";
     } elseif (!password_verify($currentPassword, $admin['password'])) {
-        $_SESSION['password_error'] = "Current password is incorrect.";
-    } elseif (strlen($newPassword) < 8) {
-        $_SESSION['password_error'] = "New password must be at least 8 characters long.";
+        $error = "Current password is incorrect.";
+    } elseif (strlen($newPassword) < 6) {
+        $error = "New password must be at least 6 characters.";
     } elseif ($newPassword !== $confirmPassword) {
-        $_SESSION['password_error'] = "New password and confirm password do not match.";
-    } elseif (password_verify($newPassword, $admin['password'])) {
-        $_SESSION['password_error'] = "New password must be different from the current password.";
+        $error = "New password and confirm password do not match.";
     } else {
         $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
 
-        $updateStmt = $conn->prepare("
-            UPDATE users
+        $stmt = $pdo->prepare("
+            UPDATE users 
             SET password = ?, reset_token = NULL, reset_expires = NULL
             WHERE id = ? AND role = 'admin'
         ");
-        $updateStmt->bind_param("si", $hashedPassword, $adminId);
+        $stmt->execute([$hashedPassword, $adminId]);
 
-        if ($updateStmt->execute()) {
-            $_SESSION['password_success'] = "Password updated successfully.";
-        } else {
-            $_SESSION['password_error'] = "Failed to update password.";
-        }
+        $_SESSION['success_message'] = "Password changed successfully.";
 
-        $updateStmt->close();
+        header("Location: /library-management-system/admin/profile.php");
+        exit();
     }
-
-    header("Location: profile.php");
-    exit();
 }
 
-// =========================
-// IMAGE PATHS
-// =========================
-$profileImage = !empty($admin['profile_image'])
-    ? "../" . ltrim($admin['profile_image'], "/")
-    : "../assets/images/default-avatar.jpg";
+/* ================= REFRESH ADMIN ================= */
+$stmt = $pdo->prepare("
+    SELECT id, fullname, email, role, created_at, profile_image, cover_image, password
+    FROM users
+    WHERE id = ? AND role = 'admin'
+    LIMIT 1
+");
+$stmt->execute([$adminId]);
+$admin = $stmt->fetch();
 
-$coverImage = !empty($admin['cover_image'])
-    ? "../" . ltrim($admin['cover_image'], "/")
-    : "../assets/images/default-cover.jpg";
+$_SESSION['fullname'] = $admin['fullname'];
+$_SESSION['email'] = $admin['email'];
+$_SESSION['profile_image'] = $admin['profile_image'] ?? null;
+$_SESSION['cover_image'] = $admin['cover_image'] ?? null;
+
+$profileImagePath = !empty($admin['profile_image'])
+    ? "../uploads/profile_images/" . $admin['profile_image']
+    : null;
+
+$coverImagePath = !empty($admin['cover_image'])
+    ? "../uploads/cover_images/" . $admin['cover_image']
+    : null;
+
+include 'header.php';
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Profile - STI Library</title>
 
-    <!-- Use your compiled CSS instead of Tailwind CDN to reduce flicker -->
-    <link rel="stylesheet" href="../assets/css/output.css">
+<main class="max-w-[1489px] mx-auto px-6 pt-40 pb-10">
+    <div class="mb-6">
+        <h1 class="text-3xl font-bold text-slate-900">My Profile</h1>
+        <p class="text-gray-500 mt-1">Overview of your admin profile information</p>
+    </div>
 
-    <style>
-        html {
-            overflow-y: scroll;
-        }
+    <div class="max-w-7xl mx-auto">
+        <?php if (!empty($success)): ?>
+            <div class="mb-6 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
+                <?= e($success) ?>
+            </div>
+        <?php endif; ?>
 
-        .image-shell {
-            position: relative;
-            overflow: hidden;
-            background: #e2e8f0;
-        }
+        <?php if (!empty($error)): ?>
+            <div class="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+                <?= e($error) ?>
+            </div>
+        <?php endif; ?>
 
-        .fade-image {
-            opacity: 0;
-            transition: opacity 220ms ease;
-        }
-
-        .fade-image.is-loaded {
-            opacity: 1;
-        }
-    </style>
-</head>
-<body class="bg-slate-50 min-h-screen">
-
-<?php require_once __DIR__ . "/header.php"; ?>
-
-<main class="max-w-7xl mx-auto px-6 pt-36 pb-10">
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
-
-        <!-- LEFT -->
-        <div class="xl:col-span-2 space-y-8">
-
-            <!-- COVER / PROFILE -->
-            <section class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
-                <div class="image-shell h-56">
-                    <img
-                        src="<?= e($coverImage) ?>"
-                        alt="Cover Image"
-                        class="fade-image w-full h-full object-cover"
-                        width="1200"
-                        height="224"
-                        loading="eager"
-                        decoding="async"
-                        onload="this.classList.add('is-loaded')"
-                        onerror="this.onerror=null; this.src='../assets/images/default-cover.jpg'; this.classList.add('is-loaded');"
-                    >
-                </div>
-
-                <div class="px-8 pb-8 relative">
-                    <div class="-mt-16 flex flex-col md:flex-row md:items-end md:justify-between gap-6">
-                        <div class="flex items-end gap-5">
-                            <div class="image-shell w-32 h-32 rounded-3xl border-4 border-white bg-white shadow-lg overflow-hidden shrink-0">
-                                <img
-                                    src="<?= e($profileImage) ?>"
-                                    alt="Profile Image"
-                                    class="fade-image w-full h-full object-cover"
-                                    width="128"
-                                    height="128"
-                                    loading="eager"
-                                    decoding="async"
-                                    onload="this.classList.add('is-loaded')"
-                                    onerror="this.onerror=null; this.src='../assets/images/default-avatar.jpg'; this.classList.add('is-loaded');"
-                                >
-                            </div>
-
-                            <div class="pb-2 min-w-0">
-                                <h1 class="text-3xl font-bold text-slate-900 break-words"><?= e($admin['fullname']) ?></h1>
-                                <p class="text-slate-500 mt-1">Administrator</p>
-                                <p class="text-sm text-slate-400 mt-1">
-                                    Member since <?= e(date('F d, Y', strtotime($admin['created_at']))) ?>
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="pb-2">
-                            <span class="inline-flex items-center px-4 py-2 rounded-xl bg-purple-100 text-purple-700 font-semibold text-sm">
-                                Admin Account
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- PROFILE INFO -->
-            <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-                <div class="mb-6">
-                    <h2 class="text-2xl font-bold text-slate-900">Profile Information</h2>
-                    <p class="text-slate-500 mt-1">You can update your full name and email here.</p>
-                </div>
-
-                <?php if (!empty($profile_success)): ?>
-                    <div class="mb-4 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
-                        <?= e($profile_success) ?>
-                    </div>
+        <!-- PROFILE CARD -->
+        <div class="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-sm">
+            <!-- COVER -->
+            <div class="relative h-[240px] group">
+                <?php if ($coverImagePath): ?>
+                    <img src="<?= e($coverImagePath) ?>" alt="Cover Image" class="w-full h-full object-cover">
+                <?php else: ?>
+                    <div class="w-full h-full bg-gradient-to-r from-purple-200 via-slate-200 to-slate-300"></div>
                 <?php endif; ?>
 
-                <?php if (!empty($profile_error)): ?>
-                    <div class="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-                        <?= e($profile_error) ?>
-                    </div>
-                <?php endif; ?>
+                <div class="absolute inset-0 bg-black/10"></div>
 
-                <form method="POST" class="space-y-6">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label class="block text-sm font-medium text-slate-600 mb-2">Full Name</label>
-                            <input
-                                type="text"
-                                name="fullname"
-                                value="<?= e($admin['fullname']) ?>"
-                                required
-                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            >
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-slate-600 mb-2">Email</label>
-                            <input
-                                type="email"
-                                name="email"
-                                value="<?= e($admin['email']) ?>"
-                                required
-                                class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                            >
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-slate-600 mb-2">Role</label>
-                            <input
-                                type="text"
-                                readonly
-                                value="<?= e(ucfirst($admin['role'])) ?>"
-                                class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                            >
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-slate-600 mb-2">Created At</label>
-                            <input
-                                type="text"
-                                readonly
-                                value="<?= e(date('F d, Y h:i A', strtotime($admin['created_at']))) ?>"
-                                class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                            >
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-slate-600 mb-2">Secret Key</label>
-                            <input
-                                type="text"
-                                readonly
-                                value="••••••••••••"
-                                class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700 focus:outline-none"
-                            >
-                        </div>
-                    </div>
-
-                    <button
-                        type="submit"
-                        name="update_profile"
-                        class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-6 py-3 rounded-2xl transition"
+                <form method="POST" enctype="multipart/form-data" class="absolute inset-0">
+                    <input 
+                        type="file" 
+                        name="cover_image" 
+                        id="coverImageInput" 
+                        accept=".jpg,.jpeg,.png,.webp" 
+                        class="hidden" 
+                        onchange="this.form.submit()"
                     >
-                        Save Profile Changes
-                    </button>
+                    <input type="hidden" name="upload_cover_image" value="1">
+
+                    <label for="coverImageInput"
+                        class="absolute inset-0 cursor-pointer flex items-start justify-end p-5 opacity-0 group-hover:opacity-100 transition">
+                        <span class="inline-flex items-center gap-2 rounded-full bg-black/60 px-4 py-2 text-sm font-medium text-white backdrop-blur">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"/>
+                            </svg>
+                            Change Cover
+                        </span>
+                    </label>
                 </form>
-            </section>
+            </div>
+
+            <!-- INFO BAR -->
+            <div class="relative px-8 pb-8">
+                <div class="flex flex-col md:flex-row md:items-end md:justify-between">
+                    <div class="flex flex-col md:flex-row md:items-end gap-6">
+                        <!-- PROFILE IMAGE -->
+                        <div class="relative -mt-16 md:-mt-20 group w-36 h-36 md:w-40 md:h-40">
+                            <div class="w-full h-full rounded-full border-[5px] border-white shadow-lg overflow-hidden bg-slate-200">
+                                <?php if ($profileImagePath): ?>
+                                    <img src="<?= e($profileImagePath) ?>" alt="Profile Image" class="w-full h-full object-cover">
+                                <?php else: ?>
+                                    <div class="w-full h-full flex items-center justify-center bg-slate-300">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-16 h-16 text-white" viewBox="0 0 24 24" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.437-.695Z" clip-rule="evenodd" />
+                                        </svg>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+
+                            <form method="POST" enctype="multipart/form-data">
+                                <input 
+                                    type="file" 
+                                    name="profile_image" 
+                                    id="profileImageInput" 
+                                    accept=".jpg,.jpeg,.png,.webp" 
+                                    class="hidden" 
+                                    onchange="this.form.submit()"
+                                >
+                                <input type="hidden" name="upload_profile_image" value="1">
+
+                                <label for="profileImageInput"
+                                    class="absolute inset-0 rounded-full cursor-pointer bg-black/0 group-hover:bg-black/35 flex items-center justify-center transition">
+                                    <span class="opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center w-12 h-12 rounded-full bg-white/90 shadow">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z"/>
+                                        </svg>
+                                    </span>
+                                </label>
+                            </form>
+                        </div>
+
+                        <!-- NAME -->
+                        <div class="pb-2">
+                            <h1 class="text-3xl md:text-4xl font-bold text-slate-900">
+                                <?= e($admin['fullname']) ?>
+                            </h1>
+                            <p class="mt-1 text-sm text-slate-500">
+                                Administrator • STI Library System
+                            </p>
+
+                            <!-- <div class="mt-3 flex flex-wrap gap-3 text-sm text-slate-500">
+                                <span><?= e($admin['email']) ?></span>
+                                <span>•</span>
+                                <span>Admin Account</span>
+                            </div> -->
+                        </div>
+                    </div>
+
+                    <!-- ROLE BADGE -->
+                    <div class="mt-6 md:mt-0">
+                        <span class="inline-flex items-center rounded-full bg-purple-100 px-4 py-2 text-sm font-semibold text-purple-700">
+                            <?= e(ucfirst($admin['role'])) ?>
+                        </span>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <!-- RIGHT -->
-        <div class="space-y-8">
-            <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-                <div class="mb-6">
-                    <h2 class="text-2xl font-bold text-slate-900">Reset Password</h2>
-                    <p class="text-slate-500 mt-1">Only password can be changed here.</p>
+        <!-- READ ONLY INFO -->
+        <div class="mt-8 bg-white rounded-[26px] border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-8 py-6 border-b border-slate-200 bg-slate-50">
+                <h2 class="text-2xl font-bold text-slate-900">Admin Information</h2>
+                <p class="text-slate-500 mt-1">Profile details are read-only</p>
+            </div>
+
+            <div class="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Full Name</label>
+                    <input 
+                        type="text" 
+                        value="<?= e($admin['fullname']) ?>" 
+                        disabled 
+                        class="w-full rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3.5 text-slate-500"
+                    >
                 </div>
 
-                <?php if (!empty($password_success)): ?>
-                    <div class="mb-4 rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
-                        <?= e($password_success) ?>
-                    </div>
-                <?php endif; ?>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Email</label>
+                    <input 
+                        type="text" 
+                        value="<?= e($admin['email']) ?>" 
+                        disabled 
+                        class="w-full rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3.5 text-slate-500"
+                    >
+                </div>
 
-                <?php if (!empty($password_error)): ?>
-                    <div class="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-                        <?= e($password_error) ?>
-                    </div>
-                <?php endif; ?>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Role</label>
+                    <input 
+                        type="text" 
+                        value="<?= e(ucfirst($admin['role'])) ?>" 
+                        disabled 
+                        class="w-full rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3.5 text-slate-500"
+                    >
+                </div>
 
-                <form method="POST" class="space-y-5" novalidate>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Created At</label>
+                    <input 
+                        type="text" 
+                        value="<?= e($admin['created_at']) ?>" 
+                        disabled 
+                        class="w-full rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3.5 text-slate-500"
+                    >
+                </div>
+            </div>
+        </div>
+
+        <!-- PASSWORD -->
+        <div class="mt-8 bg-white rounded-[26px] border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-8 py-6 border-b border-slate-200 bg-slate-50">
+                <h2 class="text-2xl font-bold text-slate-900">Reset Password</h2>
+                <p class="text-slate-500 mt-1">Change your admin account password securely</p>
+            </div>
+
+            <form method="POST" class="p-8 space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">Current Password</label>
-                        <input
-                            type="password"
-                            name="current_password"
-                            required
+                        <label class="block text-sm font-semibold text-slate-700 mb-2">Current Password</label>
+                        <input 
+                            type="password" 
+                            name="current_password" 
+                            required 
                             autocomplete="current-password"
-                            class="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            class="w-full rounded-2xl border border-slate-300 px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         >
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">New Password</label>
-                        <input
-                            type="password"
-                            name="new_password"
-                            minlength="8"
-                            required
+                        <label class="block text-sm font-semibold text-slate-700 mb-2">New Password</label>
+                        <input 
+                            type="password" 
+                            name="new_password" 
+                            required 
                             autocomplete="new-password"
-                            class="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            class="w-full rounded-2xl border border-slate-300 px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         >
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-slate-600 mb-2">Confirm New Password</label>
-                        <input
-                            type="password"
-                            name="confirm_password"
-                            minlength="8"
-                            required
+                        <label class="block text-sm font-semibold text-slate-700 mb-2">Confirm Password</label>
+                        <input 
+                            type="password" 
+                            name="confirm_password" 
+                            required 
                             autocomplete="new-password"
-                            class="w-full rounded-2xl border border-slate-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                            class="w-full rounded-2xl border border-slate-300 px-4 py-3.5 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         >
                     </div>
+                </div>
 
-                    <button
-                        type="submit"
-                        name="change_password"
-                        class="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 rounded-2xl transition"
+                <div class="flex justify-end">
+                    <button 
+                        type="submit" 
+                        name="change_password" 
+                        class="rounded-2xl bg-purple-600 px-8 py-3.5 text-white font-semibold hover:bg-purple-700 transition"
                     >
                         Update Password
                     </button>
-                </form>
-            </section>
-
-            <section class="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-                <h2 class="text-xl font-bold text-slate-900 mb-4">Security Notes</h2>
-
-                <div class="space-y-4 text-sm text-slate-600">
-                    <div class="flex items-start gap-3">
-                        <div class="w-2.5 h-2.5 rounded-full bg-green-500 mt-2"></div>
-                        <p>Admin details are read-only for safety.</p>
-                    </div>
-                    <div class="flex items-start gap-3">
-                        <div class="w-2.5 h-2.5 rounded-full bg-blue-500 mt-2"></div>
-                        <p>Password is securely updated using password hashing.</p>
-                    </div>
-                    <div class="flex items-start gap-3">
-                        <div class="w-2.5 h-2.5 rounded-full bg-purple-500 mt-2"></div>
-                        <p>Reset token fields are cleared after changing password.</p>
-                    </div>
                 </div>
-            </section>
+            </form>
         </div>
     </div>
 </main>
