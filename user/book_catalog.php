@@ -127,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         exit();
     }
 
-    // 🚫 CHECK IF USER ALREADY HAS A BORROWED BOOK
+    // CHECK IF USER ALREADY HAS 2 BORROWED BOOKS
     $stmt = $pdo->prepare("
         SELECT COUNT(*)
         FROM borrowings
@@ -136,8 +136,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     ");
     $stmt->execute([$userId]);
 
-    if ($stmt->fetchColumn() > 0) {
-        $_SESSION['error_message'] = "You can only borrow 1 book at a time. Return your current book first.";
+    if ($stmt->fetchColumn() >= 2) {
+        $_SESSION['error_message'] = "You can only borrow 2 books at a time. Return a book first.";
         header("Location: book_catalog.php");
         exit();
     }

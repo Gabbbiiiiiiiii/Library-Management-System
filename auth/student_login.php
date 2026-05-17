@@ -30,6 +30,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $_SESSION['student_id'] = $user['student_id'];
             $_SESSION['role'] = 'student';
             $_SESSION['last_activity'] = time();
+            $_SESSION['just_logged_in'] = true;
 
             header("Location: ../user/student_dashboard.php");
             exit();
@@ -166,6 +167,60 @@ function togglePassword(button, inputId) {
         isHidden ? "Hide password" : "Show password"
     );
 }
+
+
+//swap eye icon
+// function togglePassword(button, inputId) {
+//     const input = document.getElementById(inputId);
+
+//     const closedEye = button.querySelector(".eye-closed");
+//     const openEye = button.querySelector(".eye-open");
+
+//     const isHidden = input.type === "password";
+
+//     if (isHidden) {
+//         input.type = "text";
+//         closedEye.style.display = "none";
+//         openEye.style.display = "block";
+//     } else {
+//         input.type = "password";
+//         closedEye.style.display = "block";
+//         openEye.style.display = "none";
+//     }
+// }
+
+//             <button type="button" class="toggle-password"
+//         onclick="togglePassword(this, 'password')" aria-label="Show password">
+
+//     <!-- EYE WITH SLASH (DEFAULT: password hidden) -->
+//     <svg class="eye-icon eye-closed" xmlns="http://www.w3.org/2000/svg"
+//          viewBox="0 0 24 24" fill="none" stroke="currentColor">
+
+//         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+//               d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.269 2.943 9.542 7
+//                  -1.273 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z"/>
+
+//         <circle cx="12" cy="12" r="3" stroke-width="2"/>
+
+//         <!-- slash -->
+//         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+//               d="M4 4L20 20"/>
+//     </svg>
+
+//     <!-- EYE OPEN (VISIBLE WHEN PASSWORD SHOWN) -->
+//     <svg class="eye-icon eye-open" xmlns="http://www.w3.org/2000/svg"
+//          viewBox="0 0 24 24" fill="none" stroke="currentColor"
+//          style="display:none;">
+
+//         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+//               d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.269 2.943 9.542 7
+//                  -1.273 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z"/>
+
+//         <circle cx="12" cy="12" r="3" stroke-width="2"/>
+//     </svg>
+
+// </button>
+
 </script>
 
 </body>

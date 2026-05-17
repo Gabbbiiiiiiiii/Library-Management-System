@@ -6,6 +6,7 @@ $error = "";
 
 $firstname = "";
 $lastname = "";
+$contact_number = "";
 $course = "";
 $student_id = "";
 $yearlvl = "";
@@ -13,6 +14,7 @@ $yearlvl = "";
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $firstname = trim($_POST['firstname'] ?? '');
     $lastname = trim($_POST['lastname'] ?? '');
+    $contact_number = trim($_POST['contact_number'] ?? '');
     $course = trim($_POST['course'] ?? '');
     $student_id = trim($_POST['student_id'] ?? '');
     $yearlvl = trim($_POST['yearlvl'] ?? '');
@@ -25,6 +27,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $error = "First name must contain letters only.";
     } elseif (!preg_match("/^[a-zA-Z\s]+$/", $lastname)) {
         $error = "Last name must contain letters only.";
+    } elseif (!preg_match('/^09\d{9}$/', $contact_number)) {
+        $error = "Contact number must be a valid Philippine mobile number (09XXXXXXXXX).";
     } elseif (!preg_match('/^02000[0-9]+$/', $student_id)) {
         $error = "Student ID must start with 02000 and contain numbers only.";
     } elseif (strlen($password_input) < 6) {
@@ -57,13 +61,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $role = "student";
 
                 $stmt = $conn->prepare("
-                    INSERT INTO users (fullname, student_id, course, yearlvl, password, role)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (fullname, contact_number, student_id, course, yearlvl, password, role)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ");
 
                 $stmt->bind_param(
-                    "ssssss",
+                    "sssssss",
                     $fullname,
+                    $contact_number,
                     $student_id,
                     $course,
                     $yearlvl,
@@ -125,6 +130,17 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             pattern="[A-Za-z\s]+"
             title="Letters only"
             value="<?= htmlspecialchars($lastname, ENT_QUOTES, 'UTF-8') ?>"
+        >
+
+        <label for="contact_number">Contact Number</label>
+        <input
+            type="text"
+            id="contact_number"
+            name="contact_number"
+            required
+            pattern="^09\d{9}$"
+            title="Must be a valid Philippine mobile number (09XXXXXXXXX)"
+            value="<?= htmlspecialchars($contact_number, ENT_QUOTES, 'UTF-8') ?>"
         >
 
         <label for="course">Course / Strand</label>

@@ -218,6 +218,10 @@ $stmt->execute([
     ':student_name' => $studentName
 ]);
 $currentBorrowings = $stmt->fetchAll();
+
+/* ================= LIBRARY INFO MODAL (on login) ================= */
+$showLibraryInfoModal = !empty($_SESSION['just_logged_in']);
+unset($_SESSION['just_logged_in']);
 ?>
 
 <?php include 'header.php'; ?>
@@ -435,25 +439,159 @@ $currentBorrowings = $stmt->fetchAll();
         <?php endif; ?>
     </section>
 
-    <!-- LIBRARY INFO -->
-    <section class="bg-white rounded-2xl border border-gray-200 p-7 shadow-sm">
-        <h2 class="text-2xl font-bold text-slate-900 mb-8">Library Information</h2>
+<!-- BACKDROP -->
+<div id="libraryInfoBackdrop"
+     class="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md
+            opacity-0 pointer-events-none
+            transition-opacity duration-300">
+</div>
 
-        <div class="space-y-4 text-lg text-slate-900">
-            <p><span class="font-bold">Borrowing Period:</span> 1 day only</p>
-            <p><span class="font-bold">Due Time:</span> 8:59 AM next day</p>
-            <p><span class="font-bold">Library Hours:</span> Monday - Saturday, 7:00 AM - 5:00 PM</p>
+<!-- MODAL WRAPPER -->
+<div id="libraryInfoModal"
+     class="fixed inset-0 z-[101] flex items-center justify-center p-4
+            opacity-0 pointer-events-none
+            transition-opacity duration-300">
 
-            <div>
-                <p class="font-bold mb-2">Late Fees:</p>
-                <ul class="list-disc pl-8 text-slate-700 space-y-1">
-                    <li>Same-day late return after 8:59 AM: ₱2 per hour</li>
-                    <li>Hourly penalty only counts until 5:00 PM</li>
-                    <li>Starting the next day: ₱10 per day</li>
+    <!-- MODAL BOX -->
+    <div id="modalBox"
+         class="w-full max-w-lg rounded-2xl border border-white/20
+                bg-white shadow-2xl backdrop-blur-xl
+                transform scale-95 opacity-0
+                transition-all duration-300 ease-out">
+
+        <!-- HEADER -->
+        <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200 bg-slate-50 rounded-t-2xl">
+            
+            <div class="flex items-center gap-2">
+                <div class="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+                    <span><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
+                        </svg>
+                    </span>
+                </div>
+                <h2 class="text-lg font-bold text-slate-900">Library Information</h2>
+            </div>
+
+            <button id="libraryInfoClose"
+                    class="h-9 w-9 rounded-full hover:bg-gray-200 flex items-center justify-center text-lg">
+                ✕
+            </button>
+        </div>
+
+        <!-- CONTENT -->
+        <div class="px-5 py-6 space-y-5 text-slate-900 max-h-[70vh] overflow-y-auto">
+
+            <div class="space-y-3">
+                <div class="flex items-start gap-3">
+                    <span class="text-blue-600"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 2.994v2.25m10.5-2.25v2.25m-14.252 13.5V7.491a2.25 2.25 0 0 1 2.25-2.25h13.5a2.25 2.25 0 0 1 2.25 2.25v11.251m-18 0a2.25 2.25 0 0 0 2.25 2.25h13.5a2.25 2.25 0 0 0 2.25-2.25m-18 0v-7.5a2.25 2.25 0 0 1 2.25-2.25h13.5a2.25 2.25 0 0 1 2.25 2.25v7.5m-6.75-6h2.25m-9 2.25h4.5m.002-2.25h.005v.006H12v-.006Zm-.001 4.5h.006v.006h-.006v-.005Zm-2.25.001h.005v.006H9.75v-.006Zm-2.25 0h.005v.005h-.006v-.005Zm6.75-2.247h.005v.005h-.005v-.005Zm0 2.247h.006v.006h-.006v-.006Zm2.25-2.248h.006V15H16.5v-.005Z" />
+                    </svg>
+                    </span>
+                    <p><b>Borrowing Period:</b> 1 day only</p>
+                </div>
+
+                <div class="flex items-start gap-3">
+                    <span class="text-blue-600"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                    </span>
+                    <p><b>Due Time:</b> 8:59 AM next day</p>
+                </div>
+
+                <div class="flex items-start gap-3">
+                    <span class="text-blue-600"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0 0 12 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75Z" />
+                    </svg>
+                    </span>
+                    <p><b>Library Hours:</b> Monday - Saturday, 7:00 AM - 5:00 PM</p>
+                </div>
+            </div>
+
+            <!-- LATE FEES -->
+            <div class="pt-3 border-t">
+                <p class="font-bold mb-2 text-red-600">Late Fees:</p>
+                <ul class="list-disc pl-6 text-slate-700 space-y-1">
+                    <li>Same-day late return: ₱2 per hour</li>
+                    <li>Hourly penalty until 5:00 PM only</li>
+                    <li>Starting next day: ₱10 per day</li>
                 </ul>
             </div>
+
+            <!-- NOTE -->
+            <div class="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-slate-700">
+                Please return books on time to avoid penalties and help keep library resources available.
+            </div>
+
         </div>
-    </section>
+    </div>
+</div>
+
+<!-- TRIGGER BUTTON -->
+<button id="libraryInfoTab"
+        class="fixed right-0 top-1/2 z-[99] -translate-y-1/2
+               flex items-center justify-center
+               rounded-l-2xl bg-blue-600 px-2.5 py-4 text-white
+               shadow-lg hover:bg-blue-700">
+    <span><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
+                        </svg>
+                    </span>
+</button>
+
+<script>
+(function () {
+    const showModalOnLogin = <?= json_encode($showLibraryInfoModal) ?>;
+    const backdrop = document.getElementById('libraryInfoBackdrop');
+    const modal = document.getElementById('libraryInfoModal');
+    const modalBox = document.getElementById('modalBox');
+    const tab = document.getElementById('libraryInfoTab');
+    const closeBtn = document.getElementById('libraryInfoClose');
+
+    function openModal() {
+        backdrop.classList.remove('pointer-events-none');
+        modal.classList.remove('pointer-events-none');
+
+        backdrop.classList.add('opacity-100');
+        modal.classList.add('opacity-100');
+
+        requestAnimationFrame(() => {
+            modalBox.classList.remove('scale-95', 'opacity-0');
+            modalBox.classList.add('scale-100', 'opacity-100');
+        });
+
+        document.body.style.overflow = 'hidden';
+        tab.classList.add('hidden');
+    }
+
+    function closeModal() {
+        backdrop.classList.remove('opacity-100');
+        modal.classList.remove('opacity-100');
+
+        modalBox.classList.add('scale-95', 'opacity-0');
+        modalBox.classList.remove('scale-100', 'opacity-100');
+
+        setTimeout(() => {
+            backdrop.classList.add('pointer-events-none');
+            modal.classList.add('pointer-events-none');
+        }, 250);
+
+        document.body.style.overflow = '';
+        tab.classList.remove('hidden');
+    }
+
+    closeBtn.addEventListener('click', closeModal);
+    backdrop.addEventListener('click', closeModal);
+    tab.addEventListener('click', openModal);
+
+    // ✅ AUTO OPEN AFTER LOGIN
+    document.addEventListener("DOMContentLoaded", function () {
+        if (showModalOnLogin) {
+            openModal();
+        }
+    });
+
+})();
+</script>
 
 </main>
 

@@ -37,7 +37,7 @@ if (!$userId) {
 
 try {
     $stmt = $pdo->prepare("
-        SELECT id, fullname, student_id, course, yearlvl, role, created_at, profile_image, cover_image, password
+        SELECT id, fullname, contact_number, student_id, course, yearlvl, role, created_at, profile_image, cover_image, password
         FROM users
         WHERE id = ? AND role = 'student'
         LIMIT 1
@@ -163,7 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password'])) {
 
 /* ================= REFRESH USER ================= */
 $stmt = $pdo->prepare("
-    SELECT id, fullname, student_id, course, yearlvl, role, created_at, profile_image, cover_image, password
+    SELECT id, fullname, contact_number, student_id, course, yearlvl, role, created_at, profile_image, cover_image, password
     FROM users
     WHERE id = ? AND role = 'student'
     LIMIT 1
@@ -172,6 +172,7 @@ $stmt->execute([$userId]);
 $student = $stmt->fetch();
 
 $_SESSION['fullname'] = $student['fullname'];
+$_SESSION['contact_number'] = $student['contact_number'];
 $_SESSION['student_id'] = $student['student_id'];
 $_SESSION['profile_image'] = $student['profile_image'] ?? null;
 $_SESSION['cover_image'] = $student['cover_image'] ?? null;
@@ -306,6 +307,16 @@ $coverImagePath = !empty($student['cover_image'])
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-2">Full Name</label>
                     <input type="text" value="<?= e($student['fullname']) ?>" disabled class="w-full rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3.5 text-slate-500">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Contact Number</label>
+                    <input 
+                        type="text" 
+                        value="<?= e($student['contact_number']) ?>" 
+                        readonly
+                        class="w-full rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3.5 text-slate-500 cursor-not-allowed"
+                    >
                 </div>
 
                 <div>
