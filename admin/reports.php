@@ -1,25 +1,12 @@
 <?php
 session_start();
+
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
 require_once __DIR__ . '/../includes/library_helpers.php';
-require_once "auth_check.php";
-
-$currentPage = 'reports';
-
-/* ================= DATABASE CONNECTION ================= */
-try {
-    $pdo = new PDO(
-        "mysql:host=localhost;dbname=sti_library;charset=utf8mb4",
-        "root",
-        "",
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-        ]
-    );
-    setLibraryDbTimezone($pdo);
-} catch (PDOException $e) {
-    die("Database connection failed.");
-}
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/auth_check.php';
 
 /* ================= AUTO UPDATE OVERDUE ================= */
 $pdo->exec("
@@ -79,10 +66,12 @@ switch ($filter) {
                 ':start_date' => $startDate,
                 ':end_date' => $endDate
             ];
+
             $returnParams = [
                 ':start_date' => $startDate,
                 ':end_date' => $endDate
             ];
+
             $reservationCreatedParams = [
                 ':start_date' => $startDate,
                 ':end_date' => $endDate
@@ -103,7 +92,47 @@ switch ($filter) {
         break;
 }
 
-function activeFilterClass(string $value, string $filter): string {
+/* ================= RETURN DATE FILTER FOR BORROWINGS TABLE ================= */
+
+$returnBorrowWhere = "";
+$returnBorrowParams = [];
+
+switch ($filter) {
+    case 'today':
+        $returnBorrowWhere = "WHERE DATE(b.returnDate) = CURDATE()";
+        break;
+
+    case 'this_week':
+        $returnBorrowWhere = "WHERE YEARWEEK(b.returnDate, 1) = YEARWEEK(CURDATE(), 1)";
+        break;
+
+    case 'this_month':
+        $returnBorrowWhere = "WHERE MONTH(b.returnDate) = MONTH(CURDATE()) AND YEAR(b.returnDate) = YEAR(CURDATE())";
+        break;
+
+    case 'this_year':
+        $returnBorrowWhere = "WHERE YEAR(b.returnDate) = YEAR(CURDATE())";
+        break;
+
+    case 'custom':
+        if ($startDate !== '' && $endDate !== '') {
+            $returnBorrowWhere = "WHERE DATE(b.returnDate) BETWEEN :start_date AND :end_date";
+            $returnBorrowParams = [
+                ':start_date' => $startDate,
+                ':end_date' => $endDate
+            ];
+        } else {
+            $returnBorrowWhere = "WHERE MONTH(b.returnDate) = MONTH(CURDATE()) AND YEAR(b.returnDate) = YEAR(CURDATE())";
+        }
+        break;
+
+    default:
+        $returnBorrowWhere = "WHERE MONTH(b.returnDate) = MONTH(CURDATE()) AND YEAR(b.returnDate) = YEAR(CURDATE())";
+        break;
+}
+
+function activeFilterClass(string $value, string $filter): string
+{
     return $value === $filter
         ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-200'
         : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50';
@@ -111,211 +140,525 @@ function activeFilterClass(string $value, string $filter): string {
 
 /* ================= SUMMARY CARDS ================= */
 
-/* Total books/copies - overall */
-$stmt = $pdo->query("SELECT COALESCE(SUM(totalCopies), 0) FROM books");
-$totalBooks = (int)$stmt->fetchColumn();
+$totalBooks = (int)$pdo->query("SELECT COALESCE(SUM(totalCopies), 0) FROM books")->fetchColumn();
+$availableCopies = (int)$pdo->query("SELECT COALESCE(SUM(availableCopies), 0) FROM books")->fetchColumn();
 
-/* Unique titles - overall */
-$stmt = $pdo->query("SELECT COUNT(*) FROM books");
-$uniqueTitles = (int)$stmt->fetchColumn();
-
-/* Available books/copies - overall */
-$stmt = $pdo->query("SELECT COALESCE(SUM(availableCopies), 0) FROM books");
-$availableCopies = (int)$stmt->fetchColumn();
-
-/* Filtered borrowings */
 $stmt = $pdo->prepare("SELECT COUNT(*) FROM borrowings $borrowWhere");
 $stmt->execute($borrowParams);
 $totalBorrowings = (int)$stmt->fetchColumn();
 
-/* ================= OVERALL PENALTY ================= */
-$stmt = $pdo->query("
-    SELECT COALESCE(SUM(penalty), 0) AS overall_penalty
-    FROM borrowings
-");
-$overallPenalty = $stmt->fetchColumn();
-
-/* Filtered returns */
 $stmt = $pdo->prepare("SELECT COUNT(*) FROM returns $returnWhere");
 $stmt->execute($returnParams);
 $totalReturns = (int)$stmt->fetchColumn();
 
-/* Reservations created in selected period */
 $stmt = $pdo->prepare("SELECT COUNT(*) FROM reservations $reservationCreatedWhere");
 $stmt->execute($reservationCreatedParams);
 $totalReservationsCreated = (int)$stmt->fetchColumn();
 
-/* Current active borrowings - overall current status */
-$stmt = $pdo->query("SELECT COUNT(*) FROM borrowings WHERE status = 'borrowed'");
-$activeBorrowings = (int)$stmt->fetchColumn();
+$activeBorrowings = (int)$pdo->query("SELECT COUNT(*) FROM borrowings WHERE status = 'borrowed'")->fetchColumn();
+$overdueBorrowings = (int)$pdo->query("SELECT COUNT(*) FROM borrowings WHERE status = 'overdue'")->fetchColumn();
 
-/* Current overdue - overall current status */
-$stmt = $pdo->query("SELECT COUNT(*) FROM borrowings WHERE status = 'overdue'");
-$overdueBorrowings = (int)$stmt->fetchColumn();
+/* ================= PENALTY SUMMARY ================= */
 
-/* Total penalties from returns in selected period */
-$stmt = $pdo->prepare("SELECT COALESCE(SUM(penalty), 0) FROM returns $returnWhere");
-$stmt->execute($returnParams);
-$totalPenaltyCollected = (float)$stmt->fetchColumn();
+$overallPenaltyCollected = (float)$pdo->query("
+    SELECT COALESCE(SUM(penalty), 0)
+    FROM returns
+")->fetchColumn();
 
-/* ================= MOST BORROWED BOOKS ================= */
 $stmt = $pdo->prepare("
-    SELECT
-        bk.title,
-        bk.author,
-        bk.category,
-        bk.isbn,
-        COUNT(br.id) AS times_borrowed
-    FROM borrowings br
-    LEFT JOIN books bk ON br.book_id = bk.id
-    $borrowWhere
-    GROUP BY br.book_id, bk.title, bk.author, bk.category, bk.isbn
-    ORDER BY times_borrowed DESC, bk.title ASC
-    LIMIT 5
-");
-$stmt->execute($borrowParams);
-$topBooks = $stmt->fetchAll();
-
-/* ================= MOST ACTIVE STUDENTS ================= */
-$stmt = $pdo->prepare("
-        SELECT
-        COALESCE(b.studentName, 'Unknown Student') AS student_name,
-        COALESCE(b.student_id, 'N/A') AS student_id,
-        COALESCE(u.course, 'N/A') AS course,
-        COALESCE(u.yearlvl, 'N/A') AS yearlvl,
-        COUNT(b.id) AS total_borrowings,
-        COALESCE(SUM(b.penalty), 0) AS total_penalty
-    FROM borrowings b
-    LEFT JOIN users u ON b.student_id = u.student_id
-    $borrowWhere
-    GROUP BY b.student_id, u.course, u.yearlvl
-    ORDER BY total_borrowings DESC
-    LIMIT 10
-");
-$stmt->execute($borrowParams);
-$topStudents = $stmt->fetchAll();
-
-/* ================= HIGHEST PENALTY STUDENTS ================= */
-$stmt = $pdo->prepare("
-    SELECT
-        COALESCE(b.studentName, 'Unknown Student') AS student_name,
-        COALESCE(b.student_id, 'N/A') AS student_id,
-        COALESCE(u.course, 'N/A') AS course,
-        COALESCE(u.yearlvl, 'N/A') AS yearlvl,
-        COALESCE(SUM(b.penalty), 0) AS total_penalty,
-        SUM(CASE WHEN b.penalty > 0 THEN 1 ELSE 0 END) AS penalty_count
-    FROM borrowings b
-    LEFT JOIN users u ON b.student_id = u.student_id
-    $borrowWhere
-    GROUP BY b.student_id, u.course, u.yearlvl
-    HAVING total_penalty > 0
-    ORDER BY total_penalty DESC
-    LIMIT 10
-");
-$stmt->execute($borrowParams);
-$penaltyStudents = $stmt->fetchAll();
-
-/* ================= BORROWINGS BY CATEGORY ================= */
-$stmt = $pdo->prepare("
-    SELECT
-        COALESCE(bk.category, 'Uncategorized') AS category,
-        COUNT(br.id) AS total_borrowings
-    FROM borrowings br
-    LEFT JOIN books bk ON br.book_id = bk.id
-    $borrowWhere
-    GROUP BY bk.category
-    ORDER BY total_borrowings DESC, category ASC
-");
-$stmt->execute($borrowParams);
-$categoryStats = $stmt->fetchAll();
-
-/* ================= RETURNS SUMMARY ================= */
-$stmt = $pdo->prepare("
-    SELECT
-        COUNT(*) AS total_returned,
-        SUM(CASE WHEN penalty > 0 THEN 1 ELSE 0 END) AS returned_with_penalty,
-        SUM(CASE WHEN penalty = 0 THEN 1 ELSE 0 END) AS returned_on_time,
-        COALESCE(SUM(days_late), 0) AS total_days_late,
-        COALESCE(MAX(penalty), 0) AS highest_penalty
+    SELECT COALESCE(SUM(penalty), 0)
     FROM returns
     $returnWhere
 ");
 $stmt->execute($returnParams);
-$returnSummary = $stmt->fetch() ?: [
-    'total_returned' => 0,
-    'returned_with_penalty' => 0,
-    'returned_on_time' => 0,
-    'total_days_late' => 0,
-    'highest_penalty' => 0
-];
+$totalPenaltyCollected = (float)$stmt->fetchColumn();
 
-/* ================= RESERVATION SUMMARY ================= */
+$estimatedPendingPenalty = (float)$pdo->query("
+    SELECT COALESCE(SUM(GREATEST(DATEDIFF(NOW(), dueDate), 0) * 10), 0)
+    FROM borrowings
+    WHERE status = 'overdue'
+      AND returnDate IS NULL
+      AND dueDate IS NOT NULL
+")->fetchColumn();
+
+$totalPenaltyCases = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM returns
+    WHERE penalty > 0
+")->fetchColumn();
+
+$totalStudentsWithPenalty = (int)$pdo->query("
+    SELECT COUNT(DISTINCT student_id)
+    FROM returns
+    WHERE penalty > 0
+")->fetchColumn();
+
+
+/* ================= DETAILED BORROWING REPORT ================= */
+
 $stmt = $pdo->prepare("
     SELECT
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-        SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) AS ready_count,
-        SUM(CASE WHEN status = 'borrowed' THEN 1 ELSE 0 END) AS borrowed_count,
-        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
-        SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) AS expired_count
-    FROM reservations
+        b.id,
+        b.studentName,
+        b.student_id,
+        COALESCE(u.course, b.course, 'N/A') AS course,
+        COALESCE(u.yearlvl, b.yearlvl, 'N/A') AS yearlvl,
+        COALESCE(u.contact_number, 'N/A') AS contact_number,
+        bk.title AS book_title,
+        bk.author AS book_author,
+        bk.isbn AS book_isbn,
+        b.borrowDate,
+        b.dueDate,
+        b.returnDate,
+        b.status,
+        b.penalty
+    FROM borrowings b
+    LEFT JOIN books bk ON bk.id = b.book_id
+    LEFT JOIN users u ON u.student_id = b.student_id
+    $borrowWhere
+    ORDER BY b.borrowDate DESC, b.id DESC
+    LIMIT 20
+");
+$stmt->execute($borrowParams);
+$detailedBorrowings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* ================= DETAILED RETURNS REPORT ================= */
+
+$stmt = $pdo->prepare("
+    SELECT
+        b.id,
+        b.studentName,
+        b.student_id,
+        COALESCE(u.course, b.course, 'N/A') AS course,
+        COALESCE(u.yearlvl, b.yearlvl, 'N/A') AS yearlvl,
+        COALESCE(u.contact_number, 'N/A') AS contact_number,
+        bk.title AS book_title,
+        bk.author AS book_author,
+        b.returnDate AS return_date,
+        GREATEST(DATEDIFF(b.returnDate, b.dueDate), 0) AS days_late,
+        b.penalty
+    FROM borrowings b
+    LEFT JOIN books bk ON bk.id = b.book_id
+    LEFT JOIN users u ON u.student_id = b.student_id
+    $returnBorrowWhere
+      AND b.returnDate IS NOT NULL
+    ORDER BY b.returnDate DESC, b.id DESC
+    LIMIT 20
+");
+$stmt->execute($returnBorrowParams);
+$detailedReturns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* ================= DETAILED OVERDUE REPORT ================= */
+
+$stmt = $pdo->prepare("
+    SELECT
+        b.id,
+        b.studentName,
+        b.student_id,
+        COALESCE(u.course, b.course, 'N/A') AS course,
+        COALESCE(u.yearlvl, b.yearlvl, 'N/A') AS yearlvl,
+        COALESCE(u.contact_number, 'N/A') AS contact_number,
+        bk.title AS book_title,
+        bk.author AS book_author,
+        b.borrowDate,
+        b.dueDate,
+        GREATEST(DATEDIFF(NOW(), b.dueDate), 0) AS days_late,
+        GREATEST(DATEDIFF(NOW(), b.dueDate), 0) * 10 AS estimated_penalty,
+        b.status
+    FROM borrowings b
+    LEFT JOIN books bk ON bk.id = b.book_id
+    LEFT JOIN users u ON u.student_id = b.student_id
+    WHERE b.status = 'overdue'
+      AND b.returnDate IS NULL
+    ORDER BY b.dueDate ASC, b.id ASC
+    LIMIT 20
+");
+$stmt->execute();
+$detailedOverdue = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* ================= DETAILED PENALTY REPORT ================= */
+
+$stmt = $pdo->prepare("
+    SELECT
+        b.id,
+        b.studentName,
+        b.student_id,
+        COALESCE(u.course, b.course, 'N/A') AS course,
+        COALESCE(u.yearlvl, b.yearlvl, 'N/A') AS yearlvl,
+        COALESCE(u.contact_number, 'N/A') AS contact_number,
+        bk.title AS book_title,
+        bk.author AS book_author,
+        b.returnDate AS return_date,
+        GREATEST(DATEDIFF(b.returnDate, b.dueDate), 0) AS days_late,
+        b.penalty
+    FROM borrowings b
+    LEFT JOIN books bk ON bk.id = b.book_id
+    LEFT JOIN users u ON u.student_id = b.student_id
+    $returnBorrowWhere
+      AND b.returnDate IS NOT NULL
+      AND b.penalty > 0
+    ORDER BY b.penalty DESC, b.returnDate DESC
+    LIMIT 20
+");
+$stmt->execute($returnBorrowParams);
+$detailedPenalties = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* ================= DETAILED RESERVATIONS REPORT ================= */
+
+$stmt = $pdo->prepare("
+    SELECT
+        r.id,
+        COALESCE(u.fullname, 'Unknown Student') AS studentName,
+        r.student_id,
+        COALESCE(u.course, 'N/A') AS course,
+        COALESCE(u.yearlvl, 'N/A') AS yearlvl,
+        COALESCE(u.contact_number, 'N/A') AS contact_number,
+        bk.title AS book_title,
+        bk.author AS book_author,
+        r.reservationDate,
+        r.expiryDate,
+        r.status
+    FROM reservations r
+    LEFT JOIN books bk ON bk.id = r.book_id
+    LEFT JOIN users u ON u.student_id = r.student_id
     $reservationCreatedWhere
+    ORDER BY r.reservationDate DESC, r.id DESC
+    LIMIT 20
 ");
 $stmt->execute($reservationCreatedParams);
-$reservationCreatedSummary = $stmt->fetch() ?: [
-    'pending_count' => 0,
-    'ready_count' => 0,
-    'borrowed_count' => 0,
-    'cancelled_count' => 0,
-    'expired_count' => 0
-];
+$detailedReservations = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reports</title>
-    <link href="/library-management-system/assets/css/output.css" rel="stylesheet">
+    <link rel="icon" type="image/png" href="/assets/images/logo1.png">
+    <link rel="shortcut icon" href="/assets/images/logo1.png">
+    <link href="../assets/css/output.css" rel="stylesheet">
+    
+    <style>
+    body {
+        background: #f3f4f6;
+    }
+
+    .report-page {
+        max-width: 1489px;
+        margin: 0 auto;
+        padding: 145px 24px 40px;
+    }
+
+    .report-hero {
+        background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        color: white;
+        border-radius: 24px;
+        padding: 28px;
+        margin-bottom: 24px;
+        box-shadow: 0 18px 40px rgba(79, 70, 229, 0.20);
+    }
+
+    .report-hero h1 {
+        font-size: 32px;
+        font-weight: 800;
+        margin-bottom: 6px;
+    }
+
+    .report-hero p {
+        color: rgba(255, 255, 255, 0.86);
+        font-size: 15px;
+    }
+
+    .clean-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 20px;
+        padding: 22px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    .stat-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 20px;
+        padding: 22px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+    }
+
+    .stat-label {
+        font-size: 13px;
+        font-weight: 600;
+        color: #6b7280;
+    }
+
+    .stat-value {
+        font-size: 30px;
+        font-weight: 800;
+        margin-top: 12px;
+        color: #111827;
+    }
+
+    .export-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+        padding: 10px 14px;
+        color: white;
+        font-size: 14px;
+        font-weight: 700;
+        transition: 0.2s ease;
+        white-space: nowrap;
+    }
+
+    .export-btn:hover {
+        transform: translateY(-1px);
+        filter: brightness(0.95);
+    }
+
+    .report-table-scroll {
+        width: 100%;
+        max-height: 420px;
+        overflow: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+    }
+
+    .report-table {
+        width: 100%;
+        min-width: 1100px;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 14px;
+    }
+
+    .report-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: #f9fafb;
+        color: #374151;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 800;
+        padding: 14px 14px;
+        border-bottom: 1px solid #e5e7eb;
+        text-align: left;
+        white-space: nowrap;
+    }
+
+    .report-table tbody td {
+        padding: 14px;
+        border-bottom: 1px solid #f1f5f9;
+        color: #374151;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    .report-table tbody tr:hover {
+        background: #f9fafb;
+    }
+
+    .report-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    .status-pill {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        background: #eef2ff;
+        color: #4338ca;
+    }
+
+  
+   .report-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
+}
+
+.report-card-title {
+    font-size: 22px;
+    font-weight: 800;
+    color: #111827;
+    margin-bottom: 4px;
+}
+
+.report-card-subtitle {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+.report-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.report-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    padding: 10px 16px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 700;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: 0.2s ease;
+}
+
+.report-action-btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(0.95);
+}
+
+.penalty-btn {
+    background: #ca8a04;
+}
+
+.penalty-summary-btn {
+    background: #ea580c;
+}
+
+@media (max-width: 768px) {
+    .report-card-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .report-actions {
+        justify-content: flex-start;
+    }
+
+    .report-action-btn {
+        width: 100%;
+    }
+}
+       
+
+.report-table thead th {
+    padding: 13px 16px;
+}
+
+.report-table tbody td {
+    padding: 13px 16px;
+}
+
+
+    @media (max-width: 768px) {
+        .report-page {
+            padding: 130px 14px 28px;
+        }
+
+        .report-hero {
+            padding: 22px;
+            border-radius: 18px;
+        }
+
+        .report-hero h1 {
+            font-size: 26px;
+        }
+
+        .clean-card,
+        .stat-card {
+            padding: 18px;
+            border-radius: 16px;
+        }
+    }
+</style>
 </head>
+
 <body class="bg-gray-100">
 
 <?php include 'header.php'; ?>
 
-<div class="max-w-[1489px] mx-auto px-4 sm:px-6 pt-36 md:pt-40 pb-10">
-    <!-- PAGE HEADER -->
-    <div class="mb-8">
-        <h1 class="text-3xl font-bold text-gray-900">Reports</h1>
-        <p class="text-gray-600 mt-2 text-lg">View borrowings, returns, reservations, penalties, and library usage.</p>
+<main class="report-page">
+
+    <div class="report-hero">
+        <h1>Library Reports</h1>
+        <p>
+            Detailed transaction reports for borrowings, returns, overdue books, penalties, reservations, and library usage.
+        </p>
     </div>
 
-<div class="mb-6">
-    <a href="export_reports_csv.php?filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
-       class="inline-flex w-full sm:w-auto justify-center items-center rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700">
-        Export Reports CSV
-    </a>
-</div>
+    <!-- EXPORT BUTTONS -->
+    <div class="clean-card mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Export Reports</h2>
+
+        <div class="flex flex-wrap gap-3">
+            <a href="export_reports_excel.php?type=borrowings&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+               class="export-btn bg-purple-600">
+                Export Borrowings
+            </a>
+
+            <a href="export_reports_excel.php?type=returns&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+               class="export-btn bg-blue-600">
+                Export Returns
+            </a>
+
+            <a href="export_reports_excel.php?type=overdue&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+               class="export-btn bg-red-600">
+                Export Overdue Books
+            </a>
+
+            <a href="export_reports_excel.php?type=penalties&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+               class="export-btn bg-yellow-600">
+                Export Penalties
+            </a>
+            
+            <a href="export_reports_excel.php?type=penalty_summary&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+               class="report-action-btn penalty-summary-btn">
+                Export Summary
+            </a>
+
+            <a href="export_reports_excel.php?type=reservations&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+               class="export-btn bg-green-600">
+                Export Reservations
+            </a>
+        </div>
+    </div>
 
     <!-- FILTER -->
     <div class="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm mb-8">
         <form method="GET" class="space-y-4">
             <div class="flex flex-wrap gap-3">
                 <a href="reports.php?filter=today"
-                class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('today', $filter) ?>">
+                   class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('today', $filter) ?>">
                     Today
                 </a>
 
                 <a href="reports.php?filter=this_week"
-                class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('this_week', $filter) ?>">
+                   class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('this_week', $filter) ?>">
                     This Week
                 </a>
 
                 <a href="reports.php?filter=this_month"
-                class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('this_month', $filter) ?>">
+                   class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('this_month', $filter) ?>">
                     This Month
                 </a>
 
                 <a href="reports.php?filter=this_year"
-                class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('this_year', $filter) ?>">
+                   class="px-4 py-2 rounded-xl text-sm font-medium transition <?= activeFilterClass('this_year', $filter) ?>">
                     This Year
                 </a>
             </div>
@@ -323,39 +666,27 @@ $reservationCreatedSummary = $stmt->fetch() ?: [
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                    <input
-                        type="date"
-                        name="start_date"
-                        value="<?= e($startDate) ?>"
-                        class="w-full border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                    >
+                    <input type="date" name="start_date" value="<?= e($startDate) ?>"
+                           class="w-full border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-purple-500 focus:outline-none">
                 </div>
 
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                    <input
-                        type="date"
-                        name="end_date"
-                        value="<?= e($endDate) ?>"
-                        class="w-full border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-purple-500 focus:outline-none"
-                    >
+                    <input type="date" name="end_date" value="<?= e($endDate) ?>"
+                           class="w-full border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-purple-500 focus:outline-none">
                 </div>
 
                 <div>
                     <input type="hidden" name="filter" value="custom">
-                    <button
-                        type="submit"
-                        class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl px-4 py-2.5 transition"
-                    >
+                    <button type="submit"
+                            class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl px-4 py-2.5 transition">
                         Apply Custom Range
                     </button>
                 </div>
 
                 <div>
-                    <a
-                        href="reports.php"
-                        class="block w-full text-center bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-xl px-4 py-2.5 transition"
-                    >
+                    <a href="reports.php"
+                       class="block w-full text-center bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium rounded-xl px-4 py-2.5 transition">
                         Reset
                     </a>
                 </div>
@@ -365,260 +696,393 @@ $reservationCreatedSummary = $stmt->fetch() ?: [
 
     <!-- SUMMARY CARDS -->
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Total Book Copies</p>
-            <h2 class="text-3xl font-bold text-gray-900 mt-4"><?= e($totalBooks) ?></h2>
+        <div class="stat-card">
+            <p class="stat-label">Total Book Copies</p>
+            <h2 class="stat-value"><?= e($totalBooks) ?></h2>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Unique Titles</p>
-            <h2 class="text-3xl font-bold text-gray-900 mt-4"><?= e($uniqueTitles) ?></h2>
+    
+
+        <div class="stat-card">
+            <p class="stat-label">Available Copies</p>
+            <h2 class="stat-value"><?= e($availableCopies) ?></h2>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Available Copies</p>
-            <h2 class="text-3xl font-bold text-green-600 mt-4"><?= e($availableCopies) ?></h2>
+        <div class="stat-card">
+            <p class="stat-label">Borrowings Selected Period</p>
+            <h2 class="stat-value"><?= e($totalBorrowings) ?></h2>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Borrowings (Selected Period)</p>
-            <h2 class="text-3xl font-bold text-gray-900 mt-4"><?= e($totalBorrowings) ?></h2>
+        <div class="stat-card">
+            <p class="stat-label">Returns Selected Period</p>
+            <h2 class="stat-value"><?= e($totalReturns) ?></h2>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Returns (Selected Period)</p>
-            <h2 class="text-3xl font-bold text-blue-600 mt-4"><?= e($totalReturns) ?></h2>
+        <div class="stat-card">
+            <p class="stat-label">Reservations Selected Period</p>
+            <h2 class="stat-value"><?= e($totalReservationsCreated) ?></h2>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Reservations Created (Selected Period)</p>
-            <h2 class="text-3xl font-bold text-orange-600 mt-4"><?= e($totalReservationsCreated) ?></h2>
+        <div class="stat-card">
+            <p class="stat-label">Active Borrowings Current</p>
+           <h2 class="stat-value"><?= e($activeBorrowings) ?></h2>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Active Borrowings (Current)</p>
-            <h2 class="text-3xl font-bold text-purple-600 mt-4"><?= e($activeBorrowings) ?></h2>
-        </div>
-
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <p class="text-sm font-medium text-gray-500">Overdue Books (Current)</p>
-            <h2 class="text-3xl font-bold text-red-600 mt-4"><?= e($overdueBorrowings) ?></h2>
+        <div class="stat-card">
+            <p class="stat-label">Overdue Books Current</p>
+            <h2 class="stat-value"><?= e($overdueBorrowings) ?></h2>
         </div>
     </div>
 
-    <!-- SECOND ROW CARDS -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-
-        <!-- Selected Period Penalty -->
+    <!-- PENALTY CARDS -->
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <p class="text-sm text-gray-500 mb-2">
-                Penalty Collected (Selected Period)
-            </p>
-
+            <p class="text-sm text-gray-500 mb-2">Collected Penalties Selected Period</p>
             <h2 class="text-3xl font-bold text-yellow-600">
-                ₱<?= number_format($totalPenaltyCollected ?? 0, 2) ?>
+                ₱<?= number_format($totalPenaltyCollected, 2) ?>
             </h2>
         </div>
 
-        <!-- Overall Penalty -->
         <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-            <p class="text-sm text-gray-500 mb-2">
-                Total Penalties Collected (Overall)
-            </p>
-
+            <p class="text-sm text-gray-500 mb-2">Collected Penalties Overall</p>
             <h2 class="text-3xl font-bold text-yellow-600">
-                ₱<?= number_format($overallPenalty ?? 0, 2) ?>
+                ₱<?= number_format($overallPenaltyCollected, 2) ?>
             </h2>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <p class="text-sm text-gray-500 mb-2">Estimated Pending Penalties</p>
+            <h2 class="text-3xl font-bold text-red-600">
+                ₱<?= number_format($estimatedPendingPenalty, 2) ?>
+            </h2>
+            <p class="text-xs text-gray-500 mt-2">Based on current overdue books.</p>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <p class="text-sm text-gray-500 mb-2">Students With Penalties</p>
+            <h2 class="text-3xl font-bold text-gray-900">
+                <?= e($totalStudentsWithPenalty) ?>
+            </h2>
+            <p class="text-xs text-gray-500 mt-2">
+                Total penalty cases: <?= e($totalPenaltyCases) ?>
+            </p>
         </div>
     </div>
 
-    <!-- TOP BOOKS + STUDENTS -->
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
+    <!-- DETAILED REPORTS -->
+    <div class="mt-10 space-y-8">
+        <div>
+            <h2 class="text-2xl font-bold text-gray-900">Transaction Reports</h2>
+            <p class="text-gray-600 mt-1">
+                View actual borrowing, return, overdue, penalty, and reservation records based on the selected period.
+            </p>
+        </div>
 
-    <!-- MOST BORROWED BOOKS -->
-    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <h2 class="text-xl font-semibold text-gray-900 mb-5">Most Borrowed Books</h2>
+        <!-- BORROWING TRANSACTIONS REPORT -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between gap-4 flex-wrap mb-5">
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-900">Borrowing Transactions Report</h2>
+                    <p class="text-sm text-gray-500">Latest borrowing records based on the selected period.</p>
+                </div>
 
-            <?php if (empty($topBooks)): ?>
-                <p class="text-gray-500">No borrowing data available for this period.</p>
-            <?php else: ?>
-                <div class="overflow-x-auto">
-                    <table class="min-w-[700px] w-full text-sm">
-                        <thead>
-                            <tr class="border-b text-left text-gray-500">
-                                <th class="py-3 pr-4">Title</th>
-                                <th class="py-3 pr-4">Author</th>
-                                <th class="py-3 pr-4">Category</th>
-                                <th class="py-3 text-right">Borrowed</th>
+                <a href="export_reports_excel.php?type=borrowings&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+                   class="rounded-lg bg-purple-600 px-4 py-2 text-white hover:bg-purple-700 text-sm">
+                    Export Borrowings
+                </a>
+            </div>
+
+            <div class="report-table-scroll">
+                <table class="report-table">
+                    <thead>
+                        <tr class="border-b bg-gray-50 text-left text-gray-600">
+                            <th class="py-3 px-3">Student</th>
+                            <th class="py-3 px-3">Student ID</th>
+                            <th class="py-3 px-3">Course/Year</th>
+                            <th class="py-3 px-3">Contact</th>
+                            <th class="py-3 px-3">Book</th>
+                            <th class="py-3 px-3">Borrow Date</th>
+                            <th class="py-3 px-3">Due Date</th>
+                            <th class="py-3 px-3">Return Date</th>
+                            <th class="py-3 px-3">Status</th>
+                            <th class="py-3 px-3">Penalty</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        <?php if (empty($detailedBorrowings)): ?>
+                            <tr>
+                                <td colspan="10" class="py-4 px-3 text-center text-gray-500">
+                                    No borrowing records found.
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($topBooks as $book): ?>
+                        <?php else: ?>
+                            <?php foreach ($detailedBorrowings as $row): ?>
                                 <tr class="border-b last:border-b-0">
-                                    <td class="py-3 pr-4 font-medium text-gray-900"><?= e($book['title'] ?: 'Unknown Book') ?></td>
-                                    <td class="py-3 pr-4 text-gray-700"><?= e($book['author'] ?: 'Unknown Author') ?></td>
-                                    <td class="py-3 pr-4 text-gray-700"><?= e($book['category'] ?: 'Uncategorized') ?></td>
-                                    <td class="py-3 text-right font-semibold text-purple-600"><?= e((int)$book['times_borrowed']) ?></td>
+                                    <td class="py-3 px-3 font-medium"><?= e($row['studentName']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['student_id']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['course']) ?> • <?= e($row['yearlvl']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['contact_number']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['book_title'] ?: 'Unknown Book') ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['borrowDate']) ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['dueDate']) ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['returnDate']) ?></td>
+                                    <td>
+                                        <span class="status-pill">
+                                            <?= e(ucfirst($row['status'])) ?>
+                                        </span>
+                                    </td>
+                                    <td class="py-3 px-3 font-semibold text-yellow-600">
+                                        ₱<?= number_format((float)$row['penalty'], 2) ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
-        </div>
-
-    <!-- MOST ACTIVE STUDENTS -->
-    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-    <h2 class="text-xl font-semibold text-gray-900 mb-5">Most Active Students</h2>
-
-    <?php if (empty($topStudents)): ?>
-        <p class="text-gray-500">No student data available for this period.</p>
-    <?php else: ?>
-        <div class="max-h-[420px] overflow-y-auto pr-1 space-y-3">
-            <?php foreach ($topStudents as $student): ?>
-                <div class="border rounded-xl p-4">
-                    <div class="flex justify-between items-start gap-4">
-                        <div>
-                            <h3 class="font-semibold text-gray-900"><?= e($student['student_name']) ?></h3>
-                            <p class="text-sm text-gray-500">Student ID: <?= e($student['student_id']) ?></p>
-                            <p class="text-sm text-gray-500"><?= e($student['course']) ?> • <?= e($student['yearlvl']) ?></p>
-                        </div>
-
-                        <div class="text-right min-w-[90px]">
-                            <p class="text-lg font-bold text-purple-600"><?= e((int)$student['total_borrowings']) ?></p>
-                            <p class="text-xs text-gray-500">Borrowings</p>
-                        </div>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-</div>
-
-    <!-- HIGHEST PENALTY STUDENTS -->
-    <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-    <h2 class="text-xl font-semibold text-gray-900 mb-5">Highest Penalty Students</h2>
-
-    <?php if (empty($penaltyStudents)): ?>
-        <p class="text-gray-500">No penalty data available.</p>
-    <?php else: ?>
-        <div class="max-h-[420px] overflow-y-auto pr-1 space-y-3">
-            <?php foreach ($penaltyStudents as $student): ?>
-                <div class="border rounded-xl p-4">
-                    <div class="flex justify-between items-start gap-4">
-                        <div>
-                            <h3 class="font-semibold text-gray-900"><?= e($student['student_name']) ?></h3>
-                            <p class="text-sm text-gray-500">Student ID: <?= e($student['student_id']) ?></p>
-                            <p class="text-sm text-gray-500"><?= e($student['course']) ?> • <?= e($student['yearlvl']) ?></p>
-                            <p class="text-sm text-gray-500 mt-3">
-                                Penalty Cases: <span class="font-medium text-gray-700"><?= e((int)$student['penalty_count']) ?></span>
-                            </p>
-                        </div>
-
-                        <div class="text-right min-w-[90px]">
-                            <p class="text-lg font-bold text-yellow-600">
-                                ₱<?= number_format((float)$student['total_penalty'], 2) ?>
-                            </p>
-                            <p class="text-xs text-gray-500">Total Penalty</p>
-                        </div>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-</div>
-
-</div>
-
-    <!-- LOWER GRID -->
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <h2 class="text-xl font-semibold text-gray-900 mb-5">Borrowings by Category</h2>
-
-            <?php if (empty($categoryStats)): ?>
-                <p class="text-gray-500">No category data available.</p>
-            <?php else: ?>
-                <div class="space-y-4">
-                    <?php
-                    $maxCategory = !empty($categoryStats) ? max(array_column($categoryStats, 'total_borrowings')) : 0;
-                    foreach ($categoryStats as $category):
-                        $percent = $maxCategory > 0 ? ($category['total_borrowings'] / $maxCategory) * 100 : 0;
-                    ?>
-                        <div>
-                            <div class="flex justify-between text-sm mb-1">
-                                <span class="font-medium text-gray-700"><?= e($category['category']) ?></span>
-                                <span class="font-semibold text-gray-900"><?= e((int)$category['total_borrowings']) ?></span>
-                            </div>
-                            <div class="w-full bg-gray-200 rounded-full h-2.5">
-                                <div class="bg-purple-600 h-2.5 rounded-full" style="width: <?= $percent ?>%;"></div>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-        </div>
-
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <h2 class="text-xl font-semibold text-gray-900 mb-5">Returns Summary</h2>
-
-            <div class="space-y-4">
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Returned Books</span>
-                    <span class="font-semibold text-gray-900"><?= e((int)$returnSummary['total_returned']) ?></span>
-                </div>
-
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Returned On Time</span>
-                    <span class="font-semibold text-green-600"><?= e((int)$returnSummary['returned_on_time']) ?></span>
-                </div>
-
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Returned With Penalty</span>
-                    <span class="font-semibold text-red-600"><?= e((int)$returnSummary['returned_with_penalty']) ?></span>
-                </div>
-
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Total Days Late</span>
-                    <span class="font-semibold text-orange-600"><?= e((int)$returnSummary['total_days_late']) ?></span>
-                </div>
-
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Highest Penalty</span>
-                    <span class="font-semibold text-yellow-600">₱<?= number_format((float)$returnSummary['highest_penalty'], 2) ?></span>
-                </div>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition">
-            <h2 class="text-xl font-semibold text-gray-900 mb-5">Reservations Created in Selected Period</h2>
-        
-            <div class="space-y-4">
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Pending</span>
-                    <span class="font-semibold text-yellow-600"><?= e((int)($reservationCreatedSummary['pending_count'] ?? 0)) ?></span>
+        <!-- RETURNS REPORT -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between gap-4 flex-wrap mb-5">
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-900">Returns Report</h2>
+                    <p class="text-sm text-gray-500">Actual returned book records based on the selected period.</p>
                 </div>
 
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Ready</span>
-                    <span class="font-semibold text-green-600"><?= e((int)($reservationCreatedSummary['ready_count'] ?? 0)) ?></span>
-                </div>
+                <a href="export_reports_excel.php?type=returns&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+                   class="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 text-sm">
+                    Export Returns
+                </a>
+            </div>
 
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Borrowed</span>
-                    <span class="font-semibold text-blue-600"><?= e((int)($reservationCreatedSummary['borrowed_count'] ?? 0)) ?></span>
-                </div>
+            <div class="report-table-scroll">
+                <table class="report-table">
+                    <thead>
+                        <tr class="border-b bg-gray-50 text-left text-gray-600">
+                            <th class="py-3 px-3">Student</th>
+                            <th class="py-3 px-3">Student ID</th>
+                            <th class="py-3 px-3">Course/Year</th>
+                            <th class="py-3 px-3">Contact</th>
+                            <th class="py-3 px-3">Book</th>
+                            <th class="py-3 px-3">Return Date</th>
+                            <th class="py-3 px-3">Days Late</th>
+                            <th class="py-3 px-3">Penalty</th>
+                        </tr>
+                    </thead>
 
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Cancelled</span>
-                    <span class="font-semibold text-red-600"><?= e((int)($reservationCreatedSummary['cancelled_count'] ?? 0)) ?></span>
-                </div>
-
-                <div class="flex justify-between">
-                    <span class="text-gray-600">Expired</span>
-                    <span class="font-semibold text-gray-700"><?= e((int)($reservationCreatedSummary['expired_count'] ?? 0)) ?></span>
-                </div>
+                    <tbody>
+                        <?php if (empty($detailedReturns)): ?>
+                            <tr>
+                                <td colspan="8" class="py-4 px-3 text-center text-gray-500">
+                                    No return records found.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($detailedReturns as $row): ?>
+                                <tr class="border-b last:border-b-0">
+                                    <td class="py-3 px-3 font-medium"><?= e($row['studentName']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['student_id']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['course']) ?> • <?= e($row['yearlvl']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['contact_number']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['book_title'] ?: 'Unknown Book') ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['return_date']) ?></td>
+                                    <td class="py-3 px-3"><?= e((int)$row['days_late']) ?></td>
+                                    <td class="py-3 px-3 font-semibold text-yellow-600">
+                                        ₱<?= number_format((float)$row['penalty'], 2) ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
-</div>
+
+        <!-- OVERDUE BOOKS REPORT -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between gap-4 flex-wrap mb-5">
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-900">Overdue Books Report</h2>
+                    <p class="text-sm text-gray-500">Students with books that have not been returned yet.</p>
+                </div>
+
+                <a href="export_reports_excel.php?type=overdue&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+                   class="rounded-lg bg-red-600 px-4 py-2 text-white hover:bg-red-700 text-sm">
+                    Export Overdue
+                </a>
+            </div>
+
+            <div class="report-table-scroll">
+                <table class="report-table">
+                    <thead>
+                        <tr class="border-b bg-gray-50 text-left text-gray-600">
+                            <th class="py-3 px-3">Student</th>
+                            <th class="py-3 px-3">Student ID</th>
+                            <th class="py-3 px-3">Course/Year</th>
+                            <th class="py-3 px-3">Contact</th>
+                            <th class="py-3 px-3">Book</th>
+                            <th class="py-3 px-3">Borrow Date</th>
+                            <th class="py-3 px-3">Due Date</th>
+                            <th class="py-3 px-3">Days Late</th>
+                            <th class="py-3 px-3">Estimated Penalty</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        <?php if (empty($detailedOverdue)): ?>
+                            <tr>
+                                <td colspan="9" class="py-4 px-3 text-center text-gray-500">
+                                    No overdue books found.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($detailedOverdue as $row): ?>
+                                <tr class="border-b last:border-b-0">
+                                    <td class="py-3 px-3 font-medium"><?= e($row['studentName']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['student_id']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['course']) ?> • <?= e($row['yearlvl']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['contact_number']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['book_title'] ?: 'Unknown Book') ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['borrowDate']) ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['dueDate']) ?></td>
+                                    <td class="py-3 px-3 font-semibold text-red-600"><?= e((int)$row['days_late']) ?></td>
+                                    <td class="py-3 px-3 font-semibold text-yellow-600">
+                                        ₱<?= number_format((float)$row['estimated_penalty'], 2) ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- PENALTY REPORT -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="report-card-header">
+                <div>
+                    <h2 class="report-card-title">Penalty Report</h2>
+                    <p class="report-card-subtitle">Detailed penalty records from returned books.</p>
+                </div>
+
+                <div class="report-actions">
+                    <a href="export_reports_excel.php?type=penalties&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+                       class="report-action-btn penalty-btn">
+                        Export Penalties
+                    </a>
+
+                    <a href="export_reports_excel.php?type=penalty_summary&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+                       class="report-action-btn penalty-summary-btn">
+                        Export Summary
+                    </a>
+                </div>
+            </div>
+
+            <div class="report-table-scroll">
+                <table class="report-table">
+                    <thead>
+                        <tr class="border-b bg-gray-50 text-left text-gray-600">
+                            <th class="py-3 px-3">Student</th>
+                            <th class="py-3 px-3">Student ID</th>
+                            <th class="py-3 px-3">Course/Year</th>
+                            <th class="py-3 px-3">Contact</th>
+                            <th class="py-3 px-3">Book</th>
+                            <th class="py-3 px-3">Return Date</th>
+                            <th class="py-3 px-3">Days Late</th>
+                            <th class="py-3 px-3">Penalty</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        <?php if (empty($detailedPenalties)): ?>
+                            <tr>
+                                <td colspan="8" class="py-4 px-3 text-center text-gray-500">
+                                    No penalty records found.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($detailedPenalties as $row): ?>
+                                <tr class="border-b last:border-b-0">
+                                    <td class="py-3 px-3 font-medium"><?= e($row['studentName']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['student_id']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['course']) ?> • <?= e($row['yearlvl']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['contact_number']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['book_title'] ?: 'Unknown Book') ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['return_date']) ?></td>
+                                    <td class="py-3 px-3"><?= e((int)$row['days_late']) ?></td>
+                                    <td class="py-3 px-3 font-semibold text-yellow-600">
+                                        ₱<?= number_format((float)$row['penalty'], 2) ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- RESERVATIONS REPORT -->
+        <div class="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between gap-4 flex-wrap mb-5">
+                <div>
+                    <h2 class="text-xl font-semibold text-gray-900">Reservations Report</h2>
+                    <p class="text-sm text-gray-500">Actual reservation records based on the selected period.</p>
+                </div>
+
+                <a href="export_reports_excel.php?type=reservations&filter=<?= urlencode($filter) ?>&start_date=<?= urlencode($startDate) ?>&end_date=<?= urlencode($endDate) ?>"
+                   class="rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700 text-sm">
+                    Export Reservations
+                </a>
+            </div>
+
+            <div class="report-table-scroll">
+                <table class="report-table">
+                    <thead>
+                        <tr class="border-b bg-gray-50 text-left text-gray-600">
+                            <th class="py-3 px-3">Student</th>
+                            <th class="py-3 px-3">Student ID</th>
+                            <th class="py-3 px-3">Course/Year</th>
+                            <th class="py-3 px-3">Contact</th>
+                            <th class="py-3 px-3">Book</th>
+                            <th class="py-3 px-3">Reservation Date</th>
+                            <th class="py-3 px-3">Expiry Date</th>
+                            <th class="py-3 px-3">Status</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+                        <?php if (empty($detailedReservations)): ?>
+                            <tr>
+                                <td colspan="8" class="py-4 px-3 text-center text-gray-500">
+                                    No reservation records found.
+                                </td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($detailedReservations as $row): ?>
+                                <tr class="border-b last:border-b-0">
+                                    <td class="py-3 px-3 font-medium"><?= e($row['studentName']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['student_id']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['course']) ?> • <?= e($row['yearlvl']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['contact_number']) ?></td>
+                                    <td class="py-3 px-3"><?= e($row['book_title'] ?: 'Unknown Book') ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['reservationDate']) ?></td>
+                                    <td class="py-3 px-3"><?= formatDateText($row['expiryDate']) ?></td>
+                                    <td>
+                                        <span class="status-pill">
+                                            <?= e(ucfirst($row['status'])) ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
 </body>
 </html>

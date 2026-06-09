@@ -201,6 +201,11 @@ if ($adminId) {
                     Dashboard
                 </a>
 
+                <a href="manage_students.php"
+                    class="pb-3 pt-3 font-medium border-b-2 whitespace-nowrap <?= $currentPage === 'manage_students' ? 'text-purple-600 border-purple-600' : 'text-gray-700 border-transparent hover:text-purple-600' ?>">
+                    Manage Students
+                </a>
+
                 <a href="manage_books.php"
                     class="pb-3 pt-3 font-medium border-b-2 whitespace-nowrap <?= $currentPage === 'manage_books' ? 'text-purple-600 border-purple-600' : 'text-gray-700 border-transparent hover:text-purple-600' ?>">
                     Manage Books
@@ -370,4 +375,3 @@ document.addEventListener('click', function (e) {
     }
 });
 </script>
-</header>

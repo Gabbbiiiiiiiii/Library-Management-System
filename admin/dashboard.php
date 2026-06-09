@@ -1,39 +1,17 @@
 <?php
 session_start();
 require_once __DIR__ . '/../includes/library_helpers.php';
+require_once __DIR__ . '/../config/database.php';
 require_once "auth_check.php";
 
 $currentPage = 'dashboard';
 
 
-// function timeAgo($datetime) {
-//     $time = time() - strtotime($datetime);
-
-//     if ($time < 60) return 'Just now';
-
-//     if ($time < 3600) {
-//         $minutes = floor($time / 60);
-//         return $minutes . ' minute' . ($minutes === 1 ? '' : 's') . ' ago';
-//     }
-
-//     if ($time < 86400) {
-//         $hours = floor($time / 3600);
-//         return $hours . ' hour' . ($hours === 1 ? '' : 's') . ' ago';
-//     }
-
-//     if ($time < 604800) {
-//         $days = floor($time / 86400);
-//         return $days . ' day' . ($days === 1 ? '' : 's') . ' ago';
-//     }
-
-//     return date("M d, Y h:i A", strtotime($datetime));
-// }
-
-/* ================= DATABASE CONNECTION ================= */
-$pdo = new PDO("mysql:host=localhost;dbname=sti_library", "root", "");
-$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-setLibraryDbTimezone($pdo);
-processExpiredReservations($pdo);
+try {
+    processExpiredReservations($pdo);
+} catch (Throwable $e) {
+    // Keep dashboard working even if helper fails
+}
 
 /* ================= AUTO UPDATE OVERDUE ================= */
 $pdo->exec("
@@ -45,158 +23,203 @@ $pdo->exec("
       AND returnDate IS NULL
 ");
 
-/* ================= FETCH DATA ================= */
+/* ================= MAIN STATS ================= */
 
-// Books
-$stmt = $pdo->query("SELECT * FROM books");
-$books = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$totalBooks = (int)$pdo->query("
+    SELECT COALESCE(SUM(totalCopies), 0)
+    FROM books
+")->fetchColumn();
 
-// Borrowings
-$stmt = $pdo->query("SELECT * FROM borrowings");
-$borrowings = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$availableBooks = (int)$pdo->query("
+    SELECT COALESCE(SUM(availableCopies), 0)
+    FROM books
+")->fetchColumn();
 
-// Reservations
-$stmt = $pdo->query("SELECT * FROM reservations");
-$reservations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+$totalBorrowed = max(0, $totalBooks - $availableBooks);
 
+$uniqueTitles = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM books
+")->fetchColumn();
 
-/* ======================= */
-/* CALCULATIONS */
-/* ======================= */
+$categories = (int)$pdo->query("
+    SELECT COUNT(DISTINCT category)
+    FROM books
+    WHERE category IS NOT NULL AND category != ''
+")->fetchColumn();
 
-$totalBooks = array_sum(array_column($books, 'totalCopies'));
-$availableBooks = array_sum(array_column($books, 'availableCopies'));
-
-/* ACTIVE BORROWINGS */
-$stmt = $pdo->prepare("
-    SELECT COUNT(*) 
+$activeBorrowingsCount = (int)$pdo->query("
+    SELECT COUNT(*)
     FROM borrowings
     WHERE status = 'borrowed'
-");
-$stmt->execute();
-$activeBorrowingsCount = (int) $stmt->fetchColumn();
+")->fetchColumn();
 
-/* OVERDUE BOOKS */
-$stmt = $pdo->prepare("
+$overdueBorrowingsCount = (int)$pdo->query("
     SELECT COUNT(*)
     FROM borrowings
     WHERE status = 'overdue'
-");
-$stmt->execute();
-$overdueBorrowingsCount = (int) $stmt->fetchColumn();
+")->fetchColumn();
 
-/* Optional arrays if needed elsewhere */
-$stmt = $pdo->prepare("
-    SELECT *
+$activeReservationsCount = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM reservations
+    WHERE status IN ('pending', 'ready')
+")->fetchColumn();
+
+$totalReservations = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM reservations
+")->fetchColumn();
+
+$totalBorrowings = (int)$pdo->query("
+    SELECT COUNT(*)
     FROM borrowings
-    WHERE status = 'borrowed'
-");
-$stmt->execute();
-$activeBorrowings = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+")->fetchColumn();
 
-$stmt = $pdo->prepare("
-    SELECT *
+$totalStudents = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM users
+    WHERE role = 'student'
+")->fetchColumn();
+
+$collectedPenalties = (float)$pdo->query("
+    SELECT COALESCE(SUM(penalty), 0)
+    FROM returns
+")->fetchColumn();
+
+$estimatedPendingPenalty = (float)$pdo->query("
+    SELECT COALESCE(SUM(GREATEST(DATEDIFF(NOW(), dueDate), 0) * 10), 0)
     FROM borrowings
     WHERE status = 'overdue'
-");
-$stmt->execute();
-$overdueBorrowings = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-$activeReservations = array_filter($reservations, function ($r) {
-    return isset($r['status']) &&
-        ($r['status'] === 'pending' || $r['status'] === 'ready');
-});
-
-$totalPenalties = array_sum(array_map(function ($b) {
-    return $b['penalty'] ?? 0;
-}, $borrowings));
-
-
-/* ======================= */
-/* RECENT ACTIVITY */
-/* ======================= */
-
-$recentActivity = [];
-
-// Borrowings
-$stmt = $pdo->query("
-    SELECT studentName, borrowDate, returnDate
-    FROM borrowings
-    WHERE borrowDate IS NOT NULL OR returnDate IS NOT NULL
-");
-
-foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $b) {
-    if (!empty($b['borrowDate'])) {
-        $timestamp = strtotime($b['borrowDate']);
-        if ($timestamp !== false) {
-            $recentActivity[] = [
-                'type' => 'borrow',
-                'date' => $timestamp,
-                'text' => ($b['studentName'] ?? 'A student') . ' borrowed a book',
-            ];
-        }
-    }
-
-    if (!empty($b['returnDate'])) {
-        $timestamp = strtotime($b['returnDate']);
-        if ($timestamp !== false) {
-            $recentActivity[] = [
-                'type' => 'return',
-                'date' => $timestamp,
-                'text' => ($b['studentName'] ?? 'A student') . ' returned a book',
-            ];
-        }
-    }
-}
-
-// Reservations
-$stmt = $pdo->query("
-    SELECT studentName, reservationDate
-    FROM reservations
-    WHERE reservationDate IS NOT NULL
-");
-
-foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-    if (!empty($r['reservationDate'])) {
-        $timestamp = strtotime($r['reservationDate']);
-        if ($timestamp !== false) {
-            $recentActivity[] = [
-                'type' => 'reservation',
-                'date' => $timestamp,
-                'text' => ($r['studentName'] ?? 'A student') . ' reserved a book',
-            ];
-        }
-    }
-}
-
-// Sort newest first, but reservation first if same time
-usort($recentActivity, function ($a, $b) {
-    if ($b['date'] !== $a['date']) {
-        return $b['date'] <=> $a['date'];
-    }
-
-    $priority = [
-        'reservation' => 3,
-        'borrow'      => 2,
-        'return'      => 1
-    ];
-
-    return ($priority[$b['type']] ?? 0) <=> ($priority[$a['type']] ?? 0);
-});
-
-$recentActivity = array_slice($recentActivity, 0, 10);
-
-/* ======================= */
-/* OTHER STATS */
-/* ======================= */
-
-$uniqueTitles = count($books);
-$categories = count(array_unique(array_column($books, 'category')));
-$totalBorrowed = $totalBooks - $availableBooks;
+      AND returnDate IS NULL
+      AND dueDate IS NOT NULL
+")->fetchColumn();
 
 $availabilityPercent = $totalBooks > 0
     ? round(($availableBooks / $totalBooks) * 100)
     : 0;
+
+$borrowedPercent = $totalBooks > 0
+    ? round(($totalBorrowed / $totalBooks) * 100)
+    : 0;
+
+/* ================= OVERDUE WATCHLIST ================= */
+
+$stmt = $pdo->query("
+    SELECT
+        b.id,
+        b.studentName,
+        b.student_id,
+        COALESCE(u.contact_number, 'No contact') AS contact_number,
+        bk.title AS book_title,
+        b.borrowDate,
+        b.dueDate,
+        GREATEST(DATEDIFF(NOW(), b.dueDate), 0) AS days_late
+    FROM borrowings b
+    LEFT JOIN books bk ON bk.id = b.book_id
+    LEFT JOIN users u ON u.student_id = b.student_id
+    WHERE b.status = 'overdue'
+      AND b.returnDate IS NULL
+    ORDER BY b.dueDate ASC, b.id ASC
+    LIMIT 5
+");
+$overdueWatchlist = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+/* ================= RECENT ACTIVITY ================= */
+
+$recentActivity = [];
+
+/* Recent borrowings and returns */
+$stmt = $pdo->query("
+    SELECT
+        studentName,
+        borrowDate,
+        returnDate
+    FROM borrowings
+    WHERE borrowDate IS NOT NULL OR returnDate IS NOT NULL
+");
+
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    if (!empty($row['borrowDate'])) {
+        $timestamp = strtotime($row['borrowDate']);
+
+        if ($timestamp !== false) {
+            $recentActivity[] = [
+                'type' => 'borrow',
+                'date' => $timestamp,
+                'title' => 'Book Borrowed',
+                'text' => ($row['studentName'] ?? 'A student') . ' borrowed a book',
+            ];
+        }
+    }
+
+    if (!empty($row['returnDate'])) {
+        $timestamp = strtotime($row['returnDate']);
+
+        if ($timestamp !== false) {
+            $recentActivity[] = [
+                'type' => 'return',
+                'date' => $timestamp,
+                'title' => 'Book Returned',
+                'text' => ($row['studentName'] ?? 'A student') . ' returned a book',
+            ];
+        }
+    }
+}
+
+/* Recent reservations */
+$stmt = $pdo->query("
+    SELECT
+        COALESCE(u.fullname, 'A student') AS studentName,
+        r.reservationDate
+    FROM reservations r
+    LEFT JOIN users u ON u.student_id = r.student_id
+    WHERE r.reservationDate IS NOT NULL
+");
+
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $timestamp = strtotime($row['reservationDate']);
+
+    if ($timestamp !== false) {
+        $recentActivity[] = [
+            'type' => 'reservation',
+            'date' => $timestamp,
+            'title' => 'Book Reserved',
+            'text' => ($row['studentName'] ?? 'A student') . ' reserved a book',
+        ];
+    }
+}
+
+usort($recentActivity, function ($a, $b) {
+    return $b['date'] <=> $a['date'];
+});
+
+$recentActivity = array_slice($recentActivity, 0, 8);
+
+/* ================= LOW STOCK BOOKS ================= */
+
+$stmt = $pdo->query("
+    SELECT
+        title,
+        author,
+        totalCopies,
+        availableCopies
+    FROM books
+    WHERE availableCopies <= 2
+    ORDER BY availableCopies ASC, title ASC
+    LIMIT 5
+");
+$lowStockBooks = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+function dashboardActivityStyle(string $type): array
+{
+    return match ($type) {
+        'borrow' => ['bg-blue-100 text-blue-700', 'bg-blue-500'],
+        'return' => ['bg-green-100 text-green-700', 'bg-green-500'],
+        'reservation' => ['bg-orange-100 text-orange-700', 'bg-orange-500'],
+        default => ['bg-gray-100 text-gray-700', 'bg-gray-400'],
+    };
+}
 ?>
 
 <!DOCTYPE html>
@@ -206,197 +229,623 @@ $availabilityPercent = $totalBooks > 0
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard</title>
   <link href="/library-management-system/assets/css/output.css" rel="stylesheet">
+   <style>
+        body {
+            background: #f3f4f6;
+        }
+        
+                    .borrowings-action {
+    background: #4f46e5;
+}
+
+.borrowings-action:hover {
+    background: #4338ca;
+}
+            
+            .reservations-action {
+    background: #ea580c;
+}
+
+.reservations-action:hover {
+    background: #c2410c;
+}
+            
+            .reports-action {
+    background: #111827;
+}
+
+.reports-action:hover {
+    background: #1f2937;
+}
+    
+
+        .dashboard-page {
+            max-width: 1489px;
+            margin: 0 auto;
+            padding: 145px 24px 40px;
+        }
+
+        .dashboard-hero {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            border-radius: 24px;
+            padding: 28px;
+            margin-bottom: 24px;
+            box-shadow: 0 18px 40px rgba(79, 70, 229, 0.20);
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .dashboard-hero h1 {
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+
+        .dashboard-hero p {
+            color: rgba(255, 255, 255, 0.86);
+            font-size: 15px;
+        }
+
+        .hero-date {
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 16px;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .stat-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 20px;
+            padding: 22px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            transition: 0.2s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+        }
+
+        .stat-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+
+        .stat-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: #6b7280;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 800;
+            color: #111827;
+            line-height: 1;
+        }
+
+        .stat-note {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .stat-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .dashboard-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .card-title {
+            font-size: 20px;
+            font-weight: 800;
+            color: #111827;
+        }
+
+        .card-subtitle {
+            color: #6b7280;
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .quick-action {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            padding: 10px 14px;
+            font-size: 14px;
+            font-weight: 700;
+            color: white;
+            text-decoration: none;
+            transition: 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .quick-action:hover {
+            transform: translateY(-1px);
+            filter: brightness(0.95);
+        }
+
+        .progress-track {
+            width: 100%;
+            height: 10px;
+            background: #e5e7eb;
+            border-radius: 999px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 999px;
+        }
+
+        .activity-box {
+            max-height: 420px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .activity-box::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .activity-box::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 999px;
+        }
+
+        .activity-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            padding: 14px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            margin-top: 6px;
+            flex-shrink: 0;
+        }
+
+        .watch-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .watch-table th {
+            text-align: left;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #6b7280;
+            background: #f9fafb;
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .watch-table td {
+            padding: 12px;
+            border-bottom: 1px solid #f1f5f9;
+            color: #374151;
+        }
+
+        .watch-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .badge-red {
+            background: #fee2e2;
+            color: #991b1b;
+            border-radius: 999px;
+            padding: 5px 10px;
+            font-size: 12px;
+            font-weight: 800;
+            display: inline-block;
+        }
+
+        .mini-stat {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .mini-stat:last-child {
+            border-bottom: none;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-page {
+                padding: 130px 14px 28px;
+            }
+
+            .dashboard-hero {
+                padding: 22px;
+                border-radius: 18px;
+            }
+
+            .dashboard-hero h1 {
+                font-size: 26px;
+            }
+
+            .hero-date {
+                width: 100%;
+                text-align: center;
+            }               
+
+            .dashboard-card,
+            .stat-card {
+                padding: 18px;
+                border-radius: 16px;
+            }
+        }   
+    </style>
 </head>
 <body class="bg-gray-100">
     
 <?php include 'header.php'; ?>
 
-<!-- ================= PAGE CONTENT ================= -->
- <div class="max-w-[1489px] mx-auto px-4 sm:px-6 pt-36 md:pt-40 pb-10">
-<div class="mb-6">
-    <h1 class="text-2xl sm:text-3xl font-bold text-gray-800">
-        Admin Dashboard
-    </h1>
-    <p class="text-sm sm:text-base text-gray-500 mt-1">
-        Overview of library operations
-    </p>
-</div>
+<main class="dashboard-page">
 
-<!-- ================= STATS GRID ================= -->
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+    <!-- HERO -->
+    <section class="dashboard-hero">
+        <div>
+            <h1>Admin Dashboard</h1>
+            <p>Monitor library activity, overdue books, reservations, availability, and penalties.</p>
+        </div>
 
-<?php
-$stats = [
-    [
-        "Total Books",
-        $totalBooks,
-        '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-        </svg>',
-        "bg-blue-100 text-blue-600"
-    ],
-    [
-        "Available Books",
-        $availableBooks,
-        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 17l6-6 4 4 8-8"/>
-        </svg>',
-        "bg-green-100 text-green-600"
-    ],
-    [
-        "Active Borrowings",
-        $activeBorrowingsCount,
-        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <circle cx="12" cy="12" r="10" stroke-width="2"/>
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6l4 2"/>
-        </svg>',
-        "bg-purple-100 text-purple-600"
-    ],
-    [
-        "Overdue Books",
-        $overdueBorrowingsCount,
-        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86l-7.4 12.8A1 1 0 003.74 18h16.52a1 1 0 00.85-1.54l-7.4-12.8a1 1 0 00-1.72 0z"/>
-        </svg>',
-        "bg-red-100 text-red-600"
-    ],
-    [
-        "Active Reservations",
-        count($activeReservations),
-        '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.75V16.5L12 14.25 7.5 16.5V3.75m9 0H18A2.25 2.25 0 0 1 20.25 6v12A2.25 2.25 0 0 1 18 20.25H6A2.25 2.25 0 0 1 3.75 18V6A2.25 2.25 0 0 1 6 3.75h1.5m9 0h-9" />
-        </svg>',
-        "bg-orange-100 text-orange-600"
-    ],
-    [
-        "Total Penalties",
-        "₱" . number_format($totalPenalties, 2),
-        '<svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-2 0-3 1-3 2s1 2 3 2 3 1 3 2-1 2-3 2m0-10v10"/>
-        </svg>',
-        "bg-yellow-100 text-yellow-600"
-    ],
-];
+        <div class="hero-date">
+            <?= date('F d, Y') ?>
+        </div>
+    </section>
 
-foreach ($stats as $stat):
-?>
-    <div class="bg-white rounded-2xl shadow-sm border p-6 hover:shadow-lg hover:-translate-y-1 transition duration-300">
-        
-        <div class="flex justify-between items-center mb-6">
-            <p class="text-sm text-gray-600 font-medium">
-                <?= htmlspecialchars($stat[0]) ?>
-            </p>
+    <!-- MAIN STATS -->
+    <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Total Book Copies</p>
+                <div class="stat-icon bg-blue-100 text-blue-600">
+                    📚
+                </div>
+            </div>
+            <p class="stat-value"><?= e($totalBooks) ?></p>
+            <p class="stat-note"><?= e($uniqueTitles) ?> unique titles</p>
+        </div>
 
-            <div class="w-6 h-6 rounded-xl flex items-center justify-center <?= $stat[3] ?>">
-                <?= str_replace('w-6 h-6', 'w-6 h-6 stroke-current', $stat[2]) ?>
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Available Copies</p>
+                <div class="stat-icon bg-green-100 text-green-600">
+                    ✓
+                </div>
+            </div>
+            <p class="stat-value"><?= e($availableBooks) ?></p>
+            <p class="stat-note"><?= e($availabilityPercent) ?>% of total copies available</p>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Active Borrowings</p>
+                <div class="stat-icon bg-purple-100 text-purple-600">
+                    ⏱
+                </div>
+            </div>
+            <p class="stat-value"><?= e($activeBorrowingsCount) ?></p>
+            <p class="stat-note"><?= e($totalBorrowings) ?> total borrowing records</p>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Overdue Books</p>
+                <div class="stat-icon bg-red-100 text-red-600">
+                    !
+                </div>
+            </div>
+            <p class="stat-value"><?= e($overdueBorrowingsCount) ?></p>
+            <p class="stat-note">Books not returned on time</p>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Active Reservations</p>
+                <div class="stat-icon bg-orange-100 text-orange-600">
+                    ★
+                </div>
+            </div>
+            <p class="stat-value"><?= e($activeReservationsCount) ?></p>
+            <p class="stat-note"><?= e($totalReservations) ?> total reservation records</p>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Registered Students</p>
+                <div class="stat-icon bg-indigo-100 text-indigo-600">
+                    👥
+                </div>
+            </div>
+            <p class="stat-value"><?= e($totalStudents) ?></p>
+            <p class="stat-note">Student accounts in the system</p>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Collected Penalties</p>
+                <div class="stat-icon bg-yellow-100 text-yellow-600">
+                    ₱
+                </div>
+            </div>
+            <p class="stat-value">₱<?= number_format($collectedPenalties, 2) ?></p>
+            <p class="stat-note">From returned overdue books</p>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-card-top">
+                <p class="stat-label">Pending Penalties</p>
+                <div class="stat-icon bg-rose-100 text-rose-600">
+                    ₱
+                </div>
+            </div>
+            <p class="stat-value">₱<?= number_format($estimatedPendingPenalty, 2) ?></p>
+            <p class="stat-note">Estimated from current overdue books</p>
+        </div>
+    </section>
+
+    <!-- QUICK ACTIONS -->
+    <section class="dashboard-card mb-8">
+        <div class="card-header">
+            <div>
+                <h2 class="card-title">Quick Actions</h2>
+                <p class="card-subtitle">Go directly to common admin tasks.</p>
             </div>
         </div>
 
-        <p class="text-3xl font-bold text-gray-900">
-            <?= htmlspecialchars($stat[1]) ?>
-        </p>
+        <div class="flex flex-wrap gap-3">
+            <a href="manage_students.php" class="quick-action bg-purple-600">Manage Students</a>
+            <a href="manage_books.php" class="quick-action bg-blue-600">Manage Books</a>
+            <a href="manage_borrowings.php" class="quick-action borrowings-action">Borrowings</a>
+            <a href="manage_returns.php" class="quick-action bg-green-600">Returns</a>
+            <a href="manage_reservations.php" class="quick-action reservations-action">Reservations</a>
+            <a href="reports.php" class="quick-action reports-action">View Reports</a>
+        </div>
+    </section>
 
-    </div>
-<?php endforeach; ?>
+    <!-- MAIN DASHBOARD CONTENT -->
+    <section class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-8">
 
-</div>
-
-<!-- ================= RECENT ACTIVITY ================= -->
-<div class="bg-white p-6 rounded-2xl shadow-sm border mb-8">
-    <h2 class="text-lg font-semibold mb-6">Recent Activity</h2>
-
-    <?php if (empty($recentActivity)): ?>
-        <p class="text-gray-500 text-center py-8">No recent activity</p>
-    <?php else: ?>
-        <div class="space-y-4">
-            <?php foreach ($recentActivity as $activity): ?>
-                <?php
-                    $dotColor = 'bg-gray-300';
-
-                    if ($activity['type'] === 'borrow') {
-                        $dotColor = 'bg-blue-500';
-                    } elseif ($activity['type'] === 'reservation') {
-                        $dotColor = 'bg-orange-500';
-                    } elseif ($activity['type'] === 'return') {
-                        $dotColor = 'bg-green-500';
-                    }
-                ?>
-
-                <div class="flex items-start gap-4 border-b pb-3 last:border-b-0">
-                    <span class="w-2 h-2 rounded-full mt-2 shrink-0 <?= $dotColor ?>"></span>
-
-                    <div>
-                        <p class="text-sm font-medium text-gray-800">
-                            <?= htmlspecialchars($activity['text']) ?>
-                        </p>
-                        <p class="text-xs text-gray-500">
-                            <?= timeAgo(date('Y-m-d H:i:s', $activity['date'])) ?>
-                        </p>
-                    </div>
+        <!-- BOOK AVAILABILITY -->
+        <div class="dashboard-card xl:col-span-1">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Book Availability</h2>
+                    <p class="card-subtitle">Current copy distribution.</p>
                 </div>
-            <?php endforeach; ?>
-        </div>
-    <?php endif; ?>
-</div>
+            </div>
 
-<!-- ================= QUICK STATS ================= -->
-<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-5">
+                <div>
+                    <div class="flex justify-between text-sm mb-2">
+                        <span class="text-gray-600">Available Copies</span>
+                        <span class="font-bold text-green-600"><?= e($availableBooks) ?></span>
+                    </div>
 
-    <!-- Book Availability -->
-    <div class="bg-white p-6 rounded-xl shadow">
-        <h2 class="text-lg font-semibold mb-4">Book Availability</h2>
+                    <div class="progress-track">
+                        <div class="progress-fill bg-green-600" style="width: <?= e((string)$availabilityPercent) ?>%;"></div>
+                    </div>
 
-        <div class="flex justify-between">
-            <span>Total Copies</span>
-            <span><?= $totalBooks ?></span>
-        </div>
+                    <p class="text-xs text-gray-500 mt-2"><?= e($availabilityPercent) ?>% available</p>
+                </div>
 
-        <div class="flex justify-between">
-            <span>Available</span>
-            <span class="text-green-600"><?= $availableBooks ?></span>
-        </div>
+                <div>
+                    <div class="flex justify-between text-sm mb-2">
+                        <span class="text-gray-600">Borrowed Copies</span>
+                        <span class="font-bold text-blue-600"><?= e($totalBorrowed) ?></span>
+                    </div>
 
-        <div class="flex justify-between">
-            <span>Borrowed</span>
-            <span class="text-blue-600"><?= $totalBorrowed ?></span>
-        </div>
+                    <div class="progress-track">
+                        <div class="progress-fill bg-blue-600" style="width: <?= e((string)$borrowedPercent) ?>%;"></div>
+                    </div>
 
-        <div class="w-full bg-gray-200 rounded-full h-2 mt-4">
-            <div class="bg-green-600 h-2 rounded-full"
-                 style="width: <?= $availabilityPercent ?>%;"></div>
-        </div>
-
-        <p class="text-xs text-center mt-2">
-            <?= $availabilityPercent ?>% available
-        </p>
-    </div>
-
-    <!-- Library Status -->
-    <div class="bg-white p-6 rounded-xl shadow">
-        <h2 class="text-lg font-semibold mb-4">Library Status</h2>
-
-        <div class="flex justify-between">
-            <span>Unique Titles</span>
-            <span><?= $uniqueTitles ?></span>
+                    <p class="text-xs text-gray-500 mt-2"><?= e($borrowedPercent) ?>% currently borrowed</p>
+                </div>
+            </div>
         </div>
 
-        <div class="flex justify-between">
-            <span>Categories</span>
-            <span><?= $categories ?></span>
+        <!-- LIBRARY STATUS -->
+        <div class="dashboard-card xl:col-span-1">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Library Status</h2>
+                    <p class="card-subtitle">System-wide operation totals.</p>
+                </div>
+            </div>
+
+            <div>
+                <div class="mini-stat">
+                    <span class="text-gray-600">Unique Titles</span>
+                    <span class="font-bold text-gray-900"><?= e($uniqueTitles) ?></span>
+                </div>
+
+                <div class="mini-stat">
+                    <span class="text-gray-600">Categories</span>
+                    <span class="font-bold text-gray-900"><?= e($categories) ?></span>
+                </div>
+
+                <div class="mini-stat">
+                    <span class="text-gray-600">Total Borrowings</span>
+                    <span class="font-bold text-gray-900"><?= e($totalBorrowings) ?></span>
+                </div>
+
+                <div class="mini-stat">
+                    <span class="text-gray-600">Total Reservations</span>
+                    <span class="font-bold text-gray-900"><?= e($totalReservations) ?></span>
+                </div>
+            </div>
         </div>
 
-        <div class="flex justify-between">
-            <span>Total Borrowings</span>
-            <span><?= count($borrowings) ?></span>
+        <!-- LOW STOCK BOOKS -->
+        <div class="dashboard-card xl:col-span-1">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Low Availability Books</h2>
+                    <p class="card-subtitle">Books with 2 or fewer available copies.</p>
+                </div>
+            </div>
+
+            <?php if (empty($lowStockBooks)): ?>
+                <p class="text-gray-500 text-sm py-4">No low availability books.</p>
+            <?php else: ?>
+                <div class="space-y-3">
+                    <?php foreach ($lowStockBooks as $book): ?>
+                        <div class="border rounded-xl p-4">
+                            <h3 class="font-bold text-gray-900"><?= e($book['title'] ?: 'Untitled Book') ?></h3>
+                            <p class="text-sm text-gray-500"><?= e($book['author'] ?: 'Unknown Author') ?></p>
+                            <p class="text-sm mt-2">
+                                Available:
+                                <span class="font-bold text-red-600"><?= e((int)$book['availableCopies']) ?></span>
+                                /
+                                <?= e((int)$book['totalCopies']) ?>
+                            </p>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </section>
+
+ <!-- OVERDUE + RECENT ACTIVITY -->
+    <section class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+        <!-- OVERDUE WATCHLIST -->
+        <div class="dashboard-card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Overdue Watchlist</h2>
+                    <p class="card-subtitle">Students who need follow-up.</p>
+                </div>
+
+                <a href="manage_borrowings.php" class="quick-action bg-red-600">View All</a>
+            </div>
+
+            <?php if (empty($overdueWatchlist)): ?>
+                <p class="text-gray-500 text-center py-8">No overdue books right now.</p>
+            <?php else: ?>
+                <div class="overflow-x-auto">
+                    <table class="watch-table min-w-[700px]">
+                        <thead>
+                            <tr>
+                                <th>Student</th>
+                                <th>Book</th>
+                                <th>Contact</th>
+                                <th>Days Late</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            <?php foreach ($overdueWatchlist as $row): ?>
+                                <tr>
+                                    <td>
+                                        <p class="font-bold text-gray-900"><?= e($row['studentName'] ?: 'Unknown Student') ?></p>
+                                        <p class="text-xs text-gray-500"><?= e($row['student_id'] ?: 'N/A') ?></p>
+                                    </td>
+
+                                    <td><?= e($row['book_title'] ?: 'Unknown Book') ?></td>
+
+                                    <td><?= e($row['contact_number']) ?></td>
+
+                                    <td>
+                                        <span class="badge-red">
+                                            <?= e((int)$row['days_late']) ?> days
+                                        </span>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
         </div>
 
-        <div class="flex justify-between">
-            <span>Total Reservations</span>
-            <span><?= count($reservations) ?></span>
-        </div>
-    </div>
+        <!-- RECENT ACTIVITY -->
+        <div class="dashboard-card">
+            <div class="card-header">
+                <div>
+                    <h2 class="card-title">Recent Activity</h2>
+                    <p class="card-subtitle">Latest borrowing, return, and reservation actions.</p>
+                </div>
+            </div>
 
-</div>
-</div> <!-- End Page Content Wrapper -->
+            <?php if (empty($recentActivity)): ?>
+                <p class="text-gray-500 text-center py-8">No recent activity.</p>
+            <?php else: ?>
+                <div class="activity-box">
+                    <?php foreach ($recentActivity as $activity): ?>
+                        <?php [$badgeClass, $dotColor] = dashboardActivityStyle($activity['type']); ?>
+
+                        <div class="activity-item">
+                            <span class="activity-dot <?= e($dotColor) ?>"></span>
+
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="text-xs font-bold px-2 py-1 rounded-full <?= e($badgeClass) ?>">
+                                        <?= e($activity['title']) ?>
+                                    </span>
+
+                                    <span class="text-xs text-gray-500">
+                                        <?= timeAgo(date('Y-m-d H:i:s', $activity['date'])) ?>
+                                    </span>
+                                </div>
+
+                                <p class="text-sm font-medium text-gray-900 mt-2">
+                                    <?= e($activity['text']) ?>
+                                </p>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </section>
 </body>
 </html>
