@@ -58,34 +58,36 @@ if (isset($_GET['unblock'])) {
 ========================= */
 
 $search = trim($_GET['search'] ?? '');
-$filter = $_GET['filter'] ?? '';
+$filter = trim($_GET['filter'] ?? '');
 
-// Build WHERE clause for filter
 $filterWhere = '';
-$filterParams = [];
 
 if ($filter === 'blocked') {
-    $filterWhere = ' AND is_blocked = 1';
+    $filterWhere = " AND is_blocked = 1 ";
 } elseif ($filter === 'active') {
-    $filterWhere = ' AND is_blocked = 0';
+    $filterWhere = " AND is_blocked = 0 ";
 }
 
-if ($search !== '') {
-    $search_param = "%" . $search . "%";
+$sql = "
+    SELECT 
+        id,
+        fullname,
+        student_id,
+        course,
+        yearlvl,
+        contact_number,
+        profile_image,
+        created_at,
+        is_blocked
+    FROM users
+    WHERE role = 'student'
+    $filterWhere
+";
 
-    $stmt = $pdo->prepare("
-        SELECT 
-            id,
-            fullname,
-            student_id,
-            course,
-            yearlvl,
-            contact_number,
-            profile_image,
-            created_at,
-            is_blocked
-        FROM users
-        WHERE role = 'student'
+$params = [];
+
+if ($search !== '') {
+    $sql .= "
         AND (
             fullname LIKE ?
             OR student_id LIKE ?
@@ -93,37 +95,23 @@ if ($search !== '') {
             OR yearlvl LIKE ?
             OR contact_number LIKE ?
         )
-        " . $filterWhere . "
-        ORDER BY fullname ASC
-    ");
+    ";
 
-    $stmt->execute([
+    $search_param = "%" . $search . "%";
+
+    $params = [
         $search_param,
         $search_param,
         $search_param,
         $search_param,
         $search_param
-    ]);
-} else {
-    $stmt = $pdo->prepare("
-        SELECT 
-            id,
-            fullname,
-            student_id,
-            course,
-            yearlvl,
-            contact_number,
-            profile_image,
-            created_at,
-            is_blocked
-        FROM users
-        WHERE role = 'student'
-        " . $filterWhere . "
-        ORDER BY fullname ASC
-    ");
-
-    $stmt->execute();
+    ];
 }
+
+$sql .= " ORDER BY fullname ASC";
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
 
 $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -377,14 +365,6 @@ $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
             white-space: nowrap;
         }
 
-        .btn-call {
-            background: #0ea5e9;
-        }
-
-        .btn-call:hover {
-            background: #0284c7;
-        }
-
         .btn-block {
             background: #dc2626;
         }
@@ -458,13 +438,17 @@ $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     value="<?php echo e($search); ?>"
                 >
 
-                <button type="submit">Search</button>
-
                 <select name="filter" onchange="this.form.submit()">
-                    <option value="">Filter by Status</option>
-                    <option value="active" <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'active') ? 'selected' : ''; ?>>Active Students</option>
-                    <option value="blocked" <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'blocked') ? 'selected' : ''; ?>>Blocked Students</option>
+                    <option value="">All Students</option>
+                    <option value="blocked" <?php echo ($filter === 'blocked') ? 'selected' : ''; ?>>
+                        Blocked Students
+                    </option>
+                    <option value="active" <?php echo ($filter === 'active') ? 'selected' : ''; ?>>
+                        Active Students
+                    </option>
                 </select>
+
+                <button type="submit">Search</button>
 
                 <?php if ($search !== '' || $filter !== ''): ?>
                     <a href="manage_students.php" class="clear-btn">Clear</a>
@@ -553,14 +537,6 @@ $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                                 <td>
                                     <div class="actions">
-                                        <?php if (!empty($row['contact_number'])): ?>
-                                            <a 
-                                                class="btn btn-call" 
-                                                href="tel:<?php echo e($row['contact_number']); ?>"
-                                            >
-                                                Call
-                                            </a>
-                                        <?php endif; ?>
 
                                         <?php if ((int)($row['is_blocked'] ?? 0) === 1): ?>
                                             <a 
